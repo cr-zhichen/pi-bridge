@@ -1,19 +1,30 @@
 {
-	"name": "@pi-bridge/server",
+	"name": "pi-bridge-server",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
+	"description": "pi-bridge 服务端：Cloudflare Workers + Durable Objects",
+	"license": "MIT",
+	"packageManager": "pnpm@10.17.0",
 	"scripts": {
 		"dev": "wrangler dev",
 		"deploy": "wrangler deploy",
 		"cf-types": "wrangler types",
 		"typecheck": "tsc -p ."
 	},
-	"devDependencies": {
-		"wrangler": "^4.164.0"
-	},
 	"dependencies": {
 		"@modelcontextprotocol/server": "^2.4.0",
-		"@pi-bridge/protocol": "workspace:*",
 		"zod": "^4.6.7"
+	},
+	"devDependencies": {
+		"typescript": "^7.0.2",
+		"wrangler": "^4.164.0"
+	},
+	"cloudflare": {
+		"bindings": {
+			"ADMIN_KEY": {
+				"description": "登录管理页 /admin 的密钥，请设置一串足够长的随机字符"
+			}
+		}
 	}
 }

@@ -33,8 +33,8 @@ import type {
 	Ops,
 	Request,
 	Response,
-} from "@pi-bridge/protocol";
-import { WAIT_MS } from "@pi-bridge/protocol";
+} from "../../server/src/protocol.ts";
+import { WAIT_MS } from "../../server/src/protocol.ts";
 import { JOBS_DIR } from "./config.ts";
 import { clip, readLog } from "./output.ts";
 

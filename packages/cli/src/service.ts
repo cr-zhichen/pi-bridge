@@ -1,13 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { DATA_DIR, SERVICE_LOG } from "./config.ts";
 
 const NAME = "pi-bridge";
 const LABEL = "dev.pi-bridge";
-const MAIN = fileURLToPath(new URL("./main.ts", import.meta.url));
+/** 当前运行的入口文件：从源码运行时是 main.ts，安装后是打包好的 main.js。 */
+const MAIN = realpathSync(process.argv[1] ?? "");
 
 /**
  * 开机后自动运行 pi-bridge start。

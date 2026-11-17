@@ -8,7 +8,7 @@ import {
 	type OpName,
 	type Ops,
 	PROTOCOL_VERSION,
-} from "@pi-bridge/protocol";
+} from "./protocol.ts";
 import { randomId } from "./stubs.ts";
 
 export type Result<T> = { ok: true; result: T } | { ok: false; error: string };

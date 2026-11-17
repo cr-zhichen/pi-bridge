@@ -1,0 +1,40 @@
+name: Release
+
+# 推送 v* 标签时构建 CLI 并发布到 GitHub Releases。
+# 带“-”的版本（例如 v0.2.0-rc.1）发布为预发布，releases/latest 仍指向最新的正式版。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 核对版本号
+        run: |
+          WANT="${GITHUB_REF_NAME#v}"
+          for f in packages/cli/package.json packages/server/package.json; do
+            HAVE="$(jq -r .version "$f")"
+            if [ "$HAVE" != "$WANT" ]; then
+              echo "::error::$f 的版本号是 $HAVE，与标签 $GITHUB_REF_NAME 不一致。请先改成 $WANT 并合并到 main，再重新打标签。"
+              exit 1
+            fi
+          done
+      - uses: jdx/mise-action@v5
+      - run: mise run install
+      - run: mise run check
+      - run: mise run test
+      - run: mise run build-cli
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          FLAGS=""
+          case "$VERSION" in *-*) FLAGS="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" packages/cli/dist/pi-bridge.tgz \
+            --title "pi-bridge $VERSION" --generate-notes $FLAGS

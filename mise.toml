@@ -2,9 +2,13 @@
 node = "24.16.0"
 pnpm = "10.17.0"
 
+[tasks.install]
+description = "安装依赖（CLI 与服务端各自安装）"
+run = ["pnpm install", "pnpm --dir packages/server install"]
+
 [tasks.dev]
 description = "在本地运行 Worker"
-run = "pnpm --filter @pi-bridge/server dev"
+run = "pnpm --dir packages/server dev"
 
 [tasks.cli]
 description = "从源码运行 CLI，参数跟在 -- 之后"
@@ -12,16 +16,24 @@ run = "node packages/cli/src/main.ts"
 
 [tasks.cf-types]
 description = "修改 wrangler.jsonc 后重新生成 Worker 类型"
-run = "pnpm --filter @pi-bridge/server cf-types"
+run = "pnpm --dir packages/server cf-types"
 
 [tasks.check]
 description = "格式、Lint 与类型检查"
-run = ["pnpm exec biome check .", "pnpm -r typecheck"]
+run = [
+  "pnpm exec biome check .",
+  "pnpm --dir packages/cli typecheck",
+  "pnpm --dir packages/server typecheck",
+]
 
 [tasks.test]
 description = "运行单元测试"
 run = "node --test packages/cli/src/*.test.ts"
 
+[tasks.build-cli]
+description = "打包 CLI，生成 packages/cli/dist/pi-bridge.tgz"
+run = "node packages/cli/build.ts"
+
 [tasks.deploy]
 description = "部署 Worker"
-run = "pnpm --filter @pi-bridge/server deploy"
+run = "pnpm --dir packages/server run deploy"

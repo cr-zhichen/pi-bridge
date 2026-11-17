@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import type { DeviceInfo } from "@pi-bridge/protocol";
+import type { DeviceInfo } from "../../server/src/protocol.ts";
 import pkg from "../package.json" with { type: "json" };
 import { Bridge } from "./bridge.ts";
 import {

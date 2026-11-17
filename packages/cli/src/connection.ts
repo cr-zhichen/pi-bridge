@@ -4,7 +4,7 @@ import {
 	type ConnectParams,
 	PROTOCOL_VERSION,
 	type ServerMessage,
-} from "@pi-bridge/protocol";
+} from "../../server/src/protocol.ts";
 import pkg from "../package.json" with { type: "json" };
 import { type Bridge, log } from "./bridge.ts";
 import type { Config } from "./config.ts";

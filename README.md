@@ -6,18 +6,26 @@ pi-bridge 让 Claude 和 ChatGPT 网页版调用你电脑上的 [Pi](https://pi.
 
 ## 部署服务端
 
-需要 Cloudflare 账号，并在本机安装 [mise](https://mise.jdx.dev)。
+需要一个 Cloudflare 账号，免费套餐即可。两种方式任选其一。
 
-```bash
-mise install
-pnpm install
-cd packages/server
-pnpm exec wrangler secret put ADMIN_KEY   # 设置管理员密钥
-cd ../..
-mise run deploy
-```
+### 一键部署
 
-部署完成后，用管理员密钥登录 `https://<服务地址>/admin`，为每位使用者创建用户。每位用户会得到一串密钥。
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cr-zhichen/pi-bridge/tree/main/packages/server)
+
+按页面提示连接 GitHub 并填写 `ADMIN_KEY`（登录管理页的密钥，请设置一串足够长的随机字符）。Cloudflare 会在你的 GitHub 账号下创建一个新仓库并完成部署。这个仓库不会随本项目自动更新，升级时需要手动合并改动；想方便升级，请使用下面的方式。
+
+### Fork 后部署
+
+1. [Fork 本仓库](https://github.com/cr-zhichen/pi-bridge/fork)。
+2. 在 Cloudflare 控制台打开 **Workers & Pages → Create → Import a repository**，选择你的 Fork。
+3. 在构建设置中把 **Root directory** 设为 `packages/server`，其余保持默认，部署。
+4. 打开这个 Worker 的 **Settings → Variables and Secrets**，添加类型为 Secret 的 `ADMIN_KEY`。
+
+升级时在 Fork 页面点击 **Sync fork → Update branch**，Cloudflare 会自动重新部署，用户和设备数据都会保留。
+
+### 创建用户
+
+部署完成后，在浏览器打开 `https://<服务地址>/admin`，用 `ADMIN_KEY` 登录，为每位使用者创建用户。创建后页面会显示这位用户的登录命令和网页版连接器地址，只显示一次。
 
 | 配置项      | 作用             | 默认值       |
 | ----------- | ---------------- | ------------ |
@@ -25,22 +33,22 @@ mise run deploy
 
 ## 连接电脑
 
-电脑需要先安装 Pi 和 [mise](https://mise.jdx.dev)。在本仓库目录中安装命令行：
+电脑需要先安装 [Pi](https://pi.dev) 和 [Node.js](https://nodejs.org) 22.19 或更高版本。安装命令行：
 
 ```bash
-mise install
-pnpm install
-npm install -g ./packages/cli
+npm install -g https://github.com/cr-zhichen/pi-bridge/releases/latest/download/pi-bridge.tgz
 ```
 
-然后用管理员给你的密钥登录：
+用管理员给你的密钥登录，并设置开机后自动在后台运行：
 
 ```bash
 pi-bridge login https://<服务地址> <密钥>
-pi-bridge service install   # 开机后自动在后台运行
+pi-bridge service install
 ```
 
 只想临时使用时，运行 `pi-bridge start`，关闭终端即断开。运行 `pi-bridge status` 查看连接状态和网页版连接器地址。
+
+升级时重新运行上面的安装命令；设置了开机自动运行的，再运行一次 `pi-bridge service install`。
 
 ## 接入 Claude / ChatGPT
 
@@ -50,7 +58,11 @@ pi-bridge service install   # 开机后自动在后台运行
 https://<服务地址>/<密钥>/mcp
 ```
 
-认证方式选择「无」。之后在对话中告诉 AI 要操作的目录即可。
+认证方式选择「无」。之后在对话中告诉 AI 要操作的目录即可，例如“打开 ~/projects/blog，运行测试并修复失败的用例”。连接了多台电脑时，再告诉它用哪一台。
 
 > [!WARNING]
-> 这个地址包含你的密钥，拿到它就能在你的电脑上执行命令。不要分享，泄露后请在管理页重置密钥。
+> 这个地址包含你的密钥，拿到它就能在你的电脑上执行命令。不要分享，泄露后请让管理员在管理页重置密钥。
+
+## 许可证
+
+[MIT](LICENSE)

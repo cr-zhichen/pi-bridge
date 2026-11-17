@@ -3,14 +3,15 @@ import {
 	createMcpHandler,
 	McpServer,
 } from "@modelcontextprotocol/server";
+import * as z from "zod";
+import pkg from "../package.json" with { type: "json" };
 import {
 	type Capabilities,
 	type JobResult,
 	type OpName,
 	type Ops,
 	WAIT_MS,
-} from "@pi-bridge/protocol";
-import * as z from "zod";
+} from "./protocol.ts";
 import type { Result, UserHub } from "./user-hub.ts";
 
 type Hub = DurableObjectStub<UserHub>;
@@ -31,7 +32,7 @@ export function handleMcp(request: Request, hub: Hub): Promise<Response> {
 
 function buildServer(hub: Hub): McpServer {
 	const server = new McpServer(
-		{ name: "pi-bridge", version: "0.1.0" },
+		{ name: "pi-bridge", version: pkg.version },
 		{ instructions: INSTRUCTIONS },
 	);
 	const sessionId = z.string().describe("open_session 返回的 session_id");

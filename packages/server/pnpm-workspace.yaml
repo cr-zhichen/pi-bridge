@@ -1,0 +1,6 @@
+# 服务端单独安装依赖：一键部署时 Cloudflare 只复制 packages/server 这个目录。
+packages:
+  - "."
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

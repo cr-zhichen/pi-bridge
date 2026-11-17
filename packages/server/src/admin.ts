@@ -23,6 +23,15 @@ export async function handleAdmin(
 	if (parts[0] !== "api" || parts[1] !== "users") {
 		return new Response("Not Found", { status: 404 });
 	}
+	if (!env.ADMIN_KEY) {
+		return Response.json(
+			{
+				error:
+					"尚未设置管理员密钥。请在 Cloudflare 控制台为这个 Worker 添加 ADMIN_KEY 后重试",
+			},
+			{ status: 503 },
+		);
+	}
 	if (!(await isAdmin(request, env))) {
 		return Response.json({ error: "管理员密钥不正确" }, { status: 401 });
 	}

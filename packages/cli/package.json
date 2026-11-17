@@ -1,7 +1,8 @@
 {
 	"name": "pi-bridge",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"description": "让 Claude 和 ChatGPT 网页版调用本机 Pi 的工具、Skills 和 MCP",
+	"license": "MIT",
 	"type": "module",
 	"bin": {
 		"pi-bridge": "src/main.ts"
@@ -14,10 +15,10 @@
 	},
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "1.5.2",
-		"@earendil-works/pi-coding-agent": "1.5.2",
-		"@pi-bridge/protocol": "workspace:*"
+		"@earendil-works/pi-coding-agent": "1.5.2"
 	},
 	"devDependencies": {
-		"@types/node": "^24.19.2"
+		"@types/node": "^24.19.2",
+		"esbuild": "^0.28.2"
 	}
 }

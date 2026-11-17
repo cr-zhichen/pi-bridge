@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync } from "node:fs";
 import { stripVTControlCharacters } from "node:util";
-import { OUTPUT_LIMIT } from "@pi-bridge/protocol";
+import { OUTPUT_LIMIT } from "../../server/src/protocol.ts";
 
 /** 截断时开头所占的比例，其余留给结尾：命令输出的结尾通常更重要。 */
 const HEAD_SHARE = 0.25;
