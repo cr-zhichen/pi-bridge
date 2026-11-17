@@ -1,4 +1,5 @@
 import {
+	CLOSE_INCOMPATIBLE,
 	CLOSE_REPLACED,
 	CLOSE_REVOKED,
 	type ConnectParams,
@@ -57,7 +58,7 @@ export function connect(
 		let heartbeat: NodeJS.Timeout | undefined;
 		let closed = false;
 
-		const onClosed = (code: number) => {
+		const onClosed = (code: number, reason: string) => {
 			if (closed) {
 				return;
 			}
@@ -73,6 +74,13 @@ export function connect(
 					"密钥已失效或用户已被禁用。请向管理员确认后重新运行 pi-bridge login",
 				);
 				stop();
+			} else if (code === CLOSE_INCOMPATIBLE) {
+				log(
+					Number(reason) > PROTOCOL_VERSION
+						? "pi-bridge 版本过旧，无法连接服务。运行 pi-bridge update 更新"
+						: "服务端版本过旧，无法连接。请联系管理员更新服务端",
+				);
+				stop();
 			} else {
 				log("连接已断开");
 				retry();
@@ -86,7 +94,7 @@ export function connect(
 			heartbeat = setInterval(() => {
 				if (Date.now() - lastMessage > DEAD_AFTER_MS) {
 					ws.close();
-					onClosed(1006);
+					onClosed(1006, "");
 					return;
 				}
 				ws.send("ping");
@@ -103,7 +111,7 @@ export function connect(
 				ws.send(JSON.stringify(response));
 			}
 		};
-		ws.onclose = (event) => onClosed(event.code);
+		ws.onclose = (event) => onClosed(event.code, event.reason);
 	};
 
 	void attempt();

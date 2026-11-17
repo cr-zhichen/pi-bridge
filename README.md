@@ -36,7 +36,7 @@ pi-bridge 让 Claude 和 ChatGPT 网页版调用你电脑上的 [Pi](https://pi.
 电脑需要先安装 [Pi](https://pi.dev) 和 [Node.js](https://nodejs.org) 22.19 或更高版本。安装命令行：
 
 ```bash
-npm install -g https://github.com/cr-zhichen/pi-bridge/releases/latest/download/pi-bridge.tgz
+npm install -g @zgccrui/pi-bridge
 ```
 
 用管理员给你的密钥登录，并设置开机后自动在后台运行：
@@ -48,7 +48,7 @@ pi-bridge service install
 
 只想临时使用时，运行 `pi-bridge start`，关闭终端即断开。运行 `pi-bridge status` 查看连接状态和网页版连接器地址。
 
-升级时重新运行上面的安装命令；设置了开机自动运行的，再运行一次 `pi-bridge service install`。
+运行 `pi-bridge update` 更新到最新版本，开机自动运行的后台服务会随之重启。有新版本时，`pi-bridge status` 和运行日志中会提示。
 
 ## 接入 Claude / ChatGPT
 

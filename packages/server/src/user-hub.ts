@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+	CLOSE_INCOMPATIBLE,
 	CLOSE_REPLACED,
 	CLOSE_REVOKED,
 	type DeviceInfo,
@@ -62,9 +63,10 @@ export class UserHub extends DurableObject<Env> {
 		}
 		const query = new URL(request.url).searchParams;
 		if (query.get("protocol") !== String(PROTOCOL_VERSION)) {
-			return new Response("pi-bridge 命令行与服务端版本不一致，请更新后重试", {
-				status: 400,
-			});
+			const { 0: client, 1: server } = new WebSocketPair();
+			server.accept();
+			server.close(CLOSE_INCOMPATIBLE, String(PROTOCOL_VERSION));
+			return new Response(null, { status: 101, webSocket: client });
 		}
 		const id = query.get("device") ?? "";
 		if (!/^[a-z0-9]{8,32}$/.test(id)) {

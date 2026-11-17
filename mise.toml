@@ -31,7 +31,7 @@ description = "运行单元测试"
 run = "node --test packages/cli/src/*.test.ts"
 
 [tasks.build-cli]
-description = "打包 CLI，生成 packages/cli/dist/pi-bridge.tgz"
+description = "打包 CLI 到 packages/cli/dist/package"
 run = "node packages/cli/build.ts"
 
 [tasks.deploy]

@@ -40,6 +40,12 @@ export function installService(): void {
 			return;
 		}
 		case "win32": {
+			// 已在运行的任务不会被 /Run 重启，先结束它
+			try {
+				execFileSync("schtasks", ["/End", "/TN", NAME], { stdio: "ignore" });
+			} catch {
+				// 任务不存在或未在运行
+			}
 			execFileSync("schtasks", [
 				"/Create",
 				"/F",

@@ -1,13 +1,15 @@
 name: Release
 
-# 推送 v* 标签时构建 CLI 并发布到 GitHub Releases。
-# 带“-”的版本（例如 v0.2.0-rc.1）发布为预发布，releases/latest 仍指向最新的正式版。
+# 推送 v* 标签时把 CLI 发布到 npm，并创建 GitHub Release。
+# 带“-”的版本（例如 v0.2.0-rc.1）发布到 npm 的 next 标签并标为预发布，用户安装和 pi-bridge update 只会拿到正式版。
+# 发布到 npm 使用受信发布（OIDC），需要在 npm 包设置里把本仓库的 release.yml 设为受信发布者，不需要令牌。
 on:
   push:
     tags: ["v*"]
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -29,6 +31,11 @@ jobs:
       - run: mise run check
       - run: mise run test
       - run: mise run build-cli
+      - name: 发布到 npm
+        run: |
+          TAG=latest
+          case "$GITHUB_REF_NAME" in *-*) TAG=next ;; esac
+          npm publish packages/cli/dist/package --access public --tag "$TAG"
       - name: 发布
         env:
           GH_TOKEN: ${{ github.token }}
@@ -36,5 +43,5 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           FLAGS=""
           case "$VERSION" in *-*) FLAGS="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" packages/cli/dist/pi-bridge.tgz \
+          gh release create "$GITHUB_REF_NAME" \
             --title "pi-bridge $VERSION" --generate-notes $FLAGS

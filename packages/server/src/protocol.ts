@@ -38,6 +38,11 @@ export function deviceIdOf(id: string): string | undefined {
 
 /** WebSocket 关闭码：同一设备在别处重新连接，旧连接不再重连。 */
 export const CLOSE_REPLACED = 4001;
+/**
+ * WebSocket 关闭码：CLI 与服务端的协议版本不一致，关闭原因是服务端的协议版本。
+ * CLI 读不到 WebSocket 握手失败时的 HTTP 响应，所以服务端先接受连接再用这个关闭码关闭。
+ */
+export const CLOSE_INCOMPATIBLE = 4002;
 /** WebSocket 关闭码：密钥被重置或用户被禁用。 */
 export const CLOSE_REVOKED = 4003;
 

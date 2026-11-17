@@ -2,7 +2,7 @@
 import { parseArgs } from "node:util";
 import type { DeviceInfo } from "../../server/src/protocol.ts";
 import pkg from "../package.json" with { type: "json" };
-import { Bridge } from "./bridge.ts";
+import { Bridge, log } from "./bridge.ts";
 import {
 	type Config,
 	defaultDeviceName,
@@ -18,6 +18,9 @@ import {
 	serviceLogHint,
 	uninstallService,
 } from "./service.ts";
+import { installVersion, isNewer, latestVersion } from "./update.ts";
+
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const HELP = `pi-bridge ${pkg.version}
 让 Claude 和 ChatGPT 网页版调用这台电脑上的 Pi。
@@ -28,6 +31,7 @@ const HELP = `pi-bridge ${pkg.version}
   pi-bridge service install           开机后自动在后台运行
   pi-bridge service uninstall         取消开机自动运行
   pi-bridge status                    查看连接状态
+  pi-bridge update                    更新到最新版本
 
 选项：
   -h, --help      显示帮助
@@ -67,6 +71,8 @@ async function main([command, ...args]: string[]): Promise<void> {
 			return service(args[0]);
 		case "status":
 			return status();
+		case "update":
+			return update();
 		default:
 			throw new Error(
 				`未知命令：${command}。运行 pi-bridge --help 查看可用命令`,
@@ -127,6 +133,33 @@ function start(): void {
 	process.on("SIGINT", stop);
 	process.on("SIGTERM", stop);
 	connect(config, bridge, stop);
+	void notifyUpdate();
+	setInterval(notifyUpdate, UPDATE_CHECK_INTERVAL_MS);
+}
+
+async function notifyUpdate(): Promise<void> {
+	const latest = await latestVersion();
+	if (latest && isNewer(latest, pkg.version)) {
+		log(`发现新版本 ${latest}，运行 pi-bridge update 更新`);
+	}
+}
+
+async function update(): Promise<void> {
+	const latest = await latestVersion();
+	if (!latest) {
+		throw new Error("无法查询最新版本，请检查网络后重试");
+	}
+	if (!isNewer(latest, pkg.version)) {
+		console.log(`已是最新版本 ${pkg.version}`);
+		return;
+	}
+	console.log(`正在从 ${pkg.version} 更新到 ${latest}`);
+	installVersion(latest);
+	console.log(`已更新到 ${latest}`);
+	if (serviceInstalled()) {
+		installService();
+		console.log("后台服务已重启");
+	}
 }
 
 function service(action: string | undefined): void {
@@ -148,26 +181,36 @@ function service(action: string | undefined): void {
 
 async function status(): Promise<void> {
 	const config = requireConfig();
-	let connection: string;
-	try {
-		const response = await fetch(`${config.server}/${config.token}/devices`);
-		if (response.status === 401) {
-			connection = "密钥无效或用户已被禁用";
-		} else {
-			const devices = (await response.json()) as DeviceInfo[];
-			const self = devices.find((d) => d.id === config.deviceId);
-			connection = self?.online ? "在线" : "离线";
-		}
-	} catch {
-		connection = "无法连接到服务";
-	}
-	console.log(`服务地址：${config.server}
+	const [connection, latest] = await Promise.all([
+		connectionStatus(config),
+		latestVersion(),
+	]);
+	const version =
+		latest && isNewer(latest, pkg.version)
+			? `${pkg.version}（可更新到 ${latest}，运行 pi-bridge update）`
+			: pkg.version;
+	console.log(`版本：${version}
+服务地址：${config.server}
 电脑名称：${config.deviceName}
 连接状态：${connection}
 开机自动运行：${serviceInstalled() ? "已开启" : "未开启"}
 
 网页版连接器地址：
 ${mcpUrl(config)}`);
+}
+
+async function connectionStatus(config: Config): Promise<string> {
+	try {
+		const response = await fetch(`${config.server}/${config.token}/devices`);
+		if (response.status === 401) {
+			return "密钥无效或用户已被禁用";
+		}
+		const devices = (await response.json()) as DeviceInfo[];
+		const self = devices.find((d) => d.id === config.deviceId);
+		return self?.online ? "在线" : "离线";
+	} catch {
+		return "无法连接到服务";
+	}
 }
 
 function requireConfig(): Config {
