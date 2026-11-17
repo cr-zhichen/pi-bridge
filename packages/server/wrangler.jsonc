@@ -16,10 +16,5 @@
 			{ "name": "USER_HUB", "class_name": "UserHub" }
 		]
 	},
-	"migrations": [
-		{ "tag": "v1", "new_sqlite_classes": ["Registry", "UserHub"] }
-	],
-	"secrets": {
-		"required": ["ADMIN_KEY"]
-	}
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Registry", "UserHub"] }]
 }
