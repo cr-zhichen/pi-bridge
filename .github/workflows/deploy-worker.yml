@@ -1,0 +1,32 @@
+name: Deploy Worker
+
+# 正式版本标签（不含“-”）发布后，把 packages/server 部署到维护者自己的 Cloudflare 账号；也可以在 Actions 页面手动运行。
+# 需要仓库变量 CLOUDFLARE_ACCOUNT_ID 和仓库密钥 CLOUDFLARE_API_TOKEN。Fork 的仓库没有这个变量，不会运行。
+# ADMIN_KEY 保存在 Worker 的 Secrets 里，部署不会改动它。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.CLOUDFLARE_ACCOUNT_ID != '' && (github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v5
+      - name: 检查
+        working-directory: packages/server
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+      - name: 部署
+        working-directory: packages/server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm run deploy
