@@ -2,10 +2,7 @@
 
 pi-bridge 让 Claude 和 ChatGPT 网页版调用你电脑上的 [Pi](https://pi.dev)：运行命令、读写文件，以及使用 Pi 已安装的 Skills、扩展和 MCP 服务器。模型仍是网页版里的那个，本机不额外调用模型。
 
-它由两部分组成：部署在 Cloudflare Workers 上的服务端，提供网页版接入用的 MCP 地址；运行在电脑上的 `pi-bridge` 命令行，负责连接服务端并在本机执行。
-
-> [!WARNING]
-> 项目仍在开发中，以下功能尚未可用。
+它由两部分组成：部署在 Cloudflare Workers 上的服务端，提供网页版接入用的 MCP 地址；运行在电脑上的 `pi-bridge` 命令行，负责连接服务端并在本机执行。一个服务端可以供多人使用，每人可以连接多台电脑。
 
 ## 部署服务端
 
@@ -28,14 +25,22 @@ mise run deploy
 
 ## 连接电脑
 
-电脑需要先安装 Pi。
+电脑需要先安装 Pi 和 [mise](https://mise.jdx.dev)。在本仓库目录中安装命令行：
+
+```bash
+mise install
+pnpm install
+npm install -g ./packages/cli
+```
+
+然后用管理员给你的密钥登录：
 
 ```bash
 pi-bridge login https://<服务地址> <用户密钥>
 pi-bridge service install   # 开机后自动在后台运行
 ```
 
-只想临时使用时，运行 `pi-bridge start`，关闭终端即断开。
+只想临时使用时，运行 `pi-bridge start`，关闭终端即断开。运行 `pi-bridge status` 查看连接状态和网页版连接器地址。
 
 ## 接入 Claude / ChatGPT
 

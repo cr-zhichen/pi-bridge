@@ -1,0 +1,139 @@
+import {
+	CLOSE_REPLACED,
+	CLOSE_REVOKED,
+	type ConnectParams,
+	PROTOCOL_VERSION,
+	type ServerMessage,
+} from "@pi-bridge/protocol";
+import pkg from "../package.json" with { type: "json" };
+import { type Bridge, log } from "./bridge.ts";
+import type { Config } from "./config.ts";
+
+const PING_INTERVAL_MS = 20_000;
+/** 这么久没有收到任何消息，就认为连接已失效并重连。 */
+const DEAD_AFTER_MS = 60_000;
+const MAX_RETRY_DELAY_S = 60;
+
+/**
+ * 保持与 Worker 的连接，断开后自动重连。
+ * 密钥失效或同一设备在别处连接时调用 stop，不再重连。
+ */
+export function connect(
+	config: Config,
+	bridge: Bridge,
+	stop: () => void,
+): void {
+	let retries = 0;
+
+	const retry = () => {
+		const delay = Math.min(MAX_RETRY_DELAY_S, 2 ** retries);
+		retries++;
+		log(`${delay} 秒后重新连接`);
+		setTimeout(attempt, delay * 1000);
+	};
+
+	const attempt = async () => {
+		const status = await checkToken(config);
+		if (status === 401) {
+			log("密钥无效或用户已被禁用。请向管理员确认后重新运行 pi-bridge login");
+			stop();
+			return;
+		}
+		if (status !== 200) {
+			log(
+				status === undefined
+					? "无法连接到服务"
+					: `服务返回错误（HTTP ${status}）`,
+			);
+			retry();
+			return;
+		}
+		open();
+	};
+
+	const open = () => {
+		const ws = new WebSocket(connectUrl(config));
+		let lastMessage = Date.now();
+		let heartbeat: NodeJS.Timeout | undefined;
+		let closed = false;
+
+		const onClosed = (code: number) => {
+			if (closed) {
+				return;
+			}
+			closed = true;
+			clearInterval(heartbeat);
+			if (code === CLOSE_REPLACED) {
+				log(
+					"这台电脑已在其他地方连接（例如另一个 pi-bridge 进程），当前进程退出",
+				);
+				stop();
+			} else if (code === CLOSE_REVOKED) {
+				log(
+					"密钥已失效或用户已被禁用。请向管理员确认后重新运行 pi-bridge login",
+				);
+				stop();
+			} else {
+				log("连接已断开");
+				retry();
+			}
+		};
+
+		ws.onopen = () => {
+			retries = 0;
+			lastMessage = Date.now();
+			log(`已连接到 ${config.server}，设备名称：${config.deviceName}`);
+			heartbeat = setInterval(() => {
+				if (Date.now() - lastMessage > DEAD_AFTER_MS) {
+					ws.close();
+					onClosed(1006);
+					return;
+				}
+				ws.send("ping");
+			}, PING_INTERVAL_MS);
+		};
+		ws.onmessage = async (event) => {
+			lastMessage = Date.now();
+			if (event.data === "pong") {
+				return;
+			}
+			const request = JSON.parse(String(event.data)) as ServerMessage;
+			const response = await bridge.handle(request);
+			if (ws.readyState === WebSocket.OPEN) {
+				ws.send(JSON.stringify(response));
+			}
+		};
+		ws.onclose = (event) => onClosed(event.code);
+	};
+
+	void attempt();
+}
+
+/** 返回 HTTP 状态码；网络不通时返回 undefined。 */
+export async function checkToken(
+	config: Pick<Config, "server" | "token">,
+): Promise<number | undefined> {
+	try {
+		const response = await fetch(`${config.server}/${config.token}/devices`);
+		await response.body?.cancel();
+		return response.status;
+	} catch {
+		return undefined;
+	}
+}
+
+function connectUrl(config: Config): URL {
+	const url = new URL(`${config.server}/${config.token}/connect`);
+	url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+	const params: ConnectParams = {
+		protocol: String(PROTOCOL_VERSION),
+		device: config.deviceId,
+		name: config.deviceName,
+		platform: process.platform,
+		version: pkg.version,
+	};
+	for (const [key, value] of Object.entries(params)) {
+		url.searchParams.set(key, value);
+	}
+	return url;
+}

@@ -12,6 +12,8 @@
 		"wrangler": "^4.164.0"
 	},
 	"dependencies": {
-		"@pi-bridge/protocol": "workspace:*"
+		"@modelcontextprotocol/server": "^2.4.0",
+		"@pi-bridge/protocol": "workspace:*",
+		"zod": "^4.6.7"
 	}
 }

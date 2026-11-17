@@ -11,9 +11,14 @@
 		}
 	},
 	"durable_objects": {
-		"bindings": [{ "name": "USER_HUB", "class_name": "UserHub" }]
+		"bindings": [
+			{ "name": "REGISTRY", "class_name": "Registry" },
+			{ "name": "USER_HUB", "class_name": "UserHub" }
+		]
 	},
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserHub"] }],
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["Registry", "UserHub"] }
+	],
 	"secrets": {
 		"required": ["ADMIN_KEY"]
 	}

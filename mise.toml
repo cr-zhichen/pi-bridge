@@ -18,6 +18,10 @@ run = "pnpm --filter @pi-bridge/server cf-types"
 description = "格式、Lint 与类型检查"
 run = ["pnpm exec biome check .", "pnpm -r typecheck"]
 
+[tasks.test]
+description = "运行单元测试"
+run = "node --test packages/cli/src/*.test.ts"
+
 [tasks.deploy]
 description = "部署 Worker"
 run = "pnpm --filter @pi-bridge/server deploy"
