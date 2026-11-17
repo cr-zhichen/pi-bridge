@@ -3,6 +3,7 @@ import {
 	CLOSE_REPLACED,
 	CLOSE_REVOKED,
 	type ConnectParams,
+	type DeviceInfo,
 	PROTOCOL_VERSION,
 	type ServerMessage,
 } from "../../server/src/protocol.ts";
@@ -34,15 +35,15 @@ export function connect(
 	};
 
 	const attempt = async () => {
-		const status = await checkToken(config);
-		if (status === 401) {
+		const devices = await fetchDevices(config);
+		if (devices === 401) {
 			log("密钥无效或用户已被禁用。请向管理员确认后重新运行 pi-bridge login");
 			stop();
 			return;
 		}
-		if (status !== 200) {
+		if (!Array.isArray(devices)) {
 			log(
-				status === undefined
+				devices === undefined
 					? "无法连接到服务，请检查网络"
 					: "服务暂时不可用，稍后会自动重试",
 			);
@@ -117,14 +118,17 @@ export function connect(
 	void attempt();
 }
 
-/** 返回 HTTP 状态码；网络不通时返回 undefined。 */
-export async function checkToken(
+/** 该用户的电脑列表；请求失败时返回 HTTP 状态码，网络不通时返回 undefined。 */
+export async function fetchDevices(
 	config: Pick<Config, "server" | "token">,
-): Promise<number | undefined> {
+): Promise<DeviceInfo[] | number | undefined> {
 	try {
 		const response = await fetch(`${config.server}/${config.token}/devices`);
-		await response.body?.cancel();
-		return response.status;
+		if (response.status !== 200) {
+			await response.body?.cancel();
+			return response.status;
+		}
+		return (await response.json()) as DeviceInfo[];
 	} catch {
 		return undefined;
 	}

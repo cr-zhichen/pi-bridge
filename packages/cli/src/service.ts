@@ -6,7 +6,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, userInfo } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { DATA_DIR, SERVICE_LOG } from "./config.ts";
 
@@ -40,22 +40,21 @@ export function installService(): void {
 			return;
 		}
 		case "win32": {
-			// 已在运行的任务不会被 /Run 重启，先结束它
+			const file = join(tmpdir(), `${NAME}-task.xml`);
+			// schtasks 只接受带字节序标记的 UTF-16 任务定义
+			writeFileSync(
+				file,
+				Buffer.concat([
+					Buffer.from([0xff, 0xfe]),
+					Buffer.from(windowsTask(), "utf16le"),
+				]),
+			);
+			endWindowsTask();
 			try {
-				execFileSync("schtasks", ["/End", "/TN", NAME], { stdio: "ignore" });
-			} catch {
-				// 任务不存在或未在运行
+				execFileSync("schtasks", ["/Create", "/F", "/TN", NAME, "/XML", file]);
+			} finally {
+				rmSync(file, { force: true });
 			}
-			execFileSync("schtasks", [
-				"/Create",
-				"/F",
-				"/TN",
-				NAME,
-				"/SC",
-				"ONLOGON",
-				"/TR",
-				`"${process.execPath}" "${MAIN}" start`,
-			]);
 			execFileSync("schtasks", ["/Run", "/TN", NAME]);
 			return;
 		}
@@ -84,7 +83,7 @@ export function uninstallService(): void {
 			return;
 		case "win32":
 			if (serviceInstalled()) {
-				execFileSync("schtasks", ["/End", "/TN", NAME], { stdio: "ignore" });
+				endWindowsTask();
 				execFileSync("schtasks", ["/Delete", "/F", "/TN", NAME]);
 			}
 			return;
@@ -197,5 +196,57 @@ function escapeXml(text: string): string {
 	return text
 		.replaceAll("&", "&amp;")
 		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;");
+		.replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;");
+}
+
+/** 结束正在运行的计划任务；已在运行的任务不会被 /Run 重新启动。 */
+function endWindowsTask(): void {
+	try {
+		execFileSync("schtasks", ["/End", "/TN", NAME], { stdio: "ignore" });
+	} catch {
+		// 任务不存在或未在运行
+	}
+}
+
+/**
+ * 当前用户登录后运行的计划任务，不需要管理员权限。
+ * 通过 conhost --headless 启动 Node，运行时不显示控制台窗口；
+ * 不限运行时长，使用电池时也照常运行（计划任务默认 72 小时后结束，且使用电池时不启动）。
+ */
+function windowsTask(): string {
+	const sid = execFileSync("whoami", ["/user", "/fo", "csv", "/nh"], {
+		encoding: "utf8",
+	})
+		.trim()
+		.split(",")
+		.at(-1)
+		?.replaceAll('"', "");
+	const conhost = join(
+		process.env.SystemRoot ?? "C:\\Windows",
+		"System32",
+		"conhost.exe",
+	);
+	const args = `--headless "${process.execPath}" "${MAIN}" start`;
+	return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>pi-bridge</Description></RegistrationInfo>
+  <Triggers>
+    <LogonTrigger><Enabled>true</Enabled><UserId>${sid}</UserId></LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author"><UserId>${sid}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec><Command>${escapeXml(conhost)}</Command><Arguments>${escapeXml(args)}</Arguments></Exec>
+  </Actions>
+</Task>
+`;
 }

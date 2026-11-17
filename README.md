@@ -39,7 +39,7 @@ pi-bridge 让 Claude 和 ChatGPT 网页版调用你电脑上的 [Pi](https://pi.
 npm install -g @zgccrui/pi-bridge
 ```
 
-用管理员给你的密钥登录，并设置开机后自动在后台运行：
+用管理员给你的密钥登录，并设置开机后自动在后台运行。第一次登录时会询问电脑名称，网页版 AI 在你有多台电脑在线时按这个名称选择：
 
 ```bash
 pi-bridge login https://<服务地址> <密钥>
@@ -47,6 +47,8 @@ pi-bridge service install
 ```
 
 只想临时使用时，运行 `pi-bridge start`，关闭终端即断开。运行 `pi-bridge status` 查看连接状态和网页版连接器地址。
+
+运行 `pi-bridge rename <电脑名称>` 修改电脑名称。
 
 运行 `pi-bridge update` 更新到最新版本，开机自动运行的后台服务会随之重启。有新版本时，`pi-bridge status` 和运行日志中会提示。
 
