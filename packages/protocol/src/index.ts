@@ -92,10 +92,14 @@ export interface Ops {
 		result: Capabilities;
 	};
 	call: {
-		params: { sessionId: string; tool: string; args: unknown };
+		/** jobId 由 Worker 生成。 */
+		params: { sessionId: string; tool: string; args: unknown; jobId: string };
 		result: JobResult;
 	};
-	run: { params: { sessionId: string; command: string }; result: JobResult };
+	run: {
+		params: { sessionId: string; command: string; jobId: string };
+		result: JobResult;
+	};
 	wait: { params: { jobId: string }; result: JobResult };
 	cancel: { params: { jobId: string }; result: JobResult };
 }

@@ -172,9 +172,12 @@ function buildServer(hub: Hub): McpServer {
 async function forward<K extends Exclude<OpName, "open_session">>(
 	hub: Hub,
 	op: K,
-	params: Ops[K]["params"],
+	params: Omit<Ops[K]["params"], "jobId"> | Ops[K]["params"],
 ): Promise<Result<Ops[K]["result"]>> {
-	return (await hub.forward(op, params)) as Result<Ops[K]["result"]>;
+	return (await hub.forward(
+		op,
+		params as { sessionId: string } | { jobId: string },
+	)) as Result<Ops[K]["result"]>;
 }
 
 function jobResult(result: Result<JobResult>): CallToolResult {

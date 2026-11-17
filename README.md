@@ -36,7 +36,7 @@ npm install -g ./packages/cli
 然后用管理员给你的密钥登录：
 
 ```bash
-pi-bridge login https://<服务地址> <用户密钥>
+pi-bridge login https://<服务地址> <密钥>
 pi-bridge service install   # 开机后自动在后台运行
 ```
 
@@ -47,7 +47,7 @@ pi-bridge service install   # 开机后自动在后台运行
 在网页版中添加自定义连接器，地址填写：
 
 ```text
-https://<服务地址>/<用户密钥>/mcp
+https://<服务地址>/<密钥>/mcp
 ```
 
 认证方式选择「无」。之后在对话中告诉 AI 要操作的目录即可。

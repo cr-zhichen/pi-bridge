@@ -146,7 +146,7 @@ export const ADMIN_PAGE = `<!doctype html>
 
 	<section class="card">
 		<table>
-			<thead><tr><th>用户</th><th>设备</th><th>创建时间</th><th></th></tr></thead>
+			<thead><tr><th>用户</th><th>电脑</th><th>创建时间</th><th></th></tr></thead>
 			<tbody id="users"></tbody>
 		</table>
 		<div id="empty" class="empty" hidden>还没有用户</div>

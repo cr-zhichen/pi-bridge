@@ -117,13 +117,9 @@ export class Bridge {
 					this.listCapabilities(request.params.sessionId, request.params.tools),
 				);
 			case "run":
-				return this.run(request.params.sessionId, request.params.command);
+				return this.run(request.params);
 			case "call":
-				return this.call(
-					request.params.sessionId,
-					request.params.tool,
-					request.params.args,
-				);
+				return this.call(request.params);
 			case "wait":
 				return this.waitJob(this.job(request.params.jobId));
 			case "cancel":
@@ -202,9 +198,13 @@ export class Bridge {
 		};
 	}
 
-	private run(sessionId: string, command: string): Promise<JobResult> {
+	private run({
+		sessionId,
+		command,
+		jobId,
+	}: Ops["run"]["params"]): Promise<JobResult> {
 		const session = this.session(sessionId);
-		const job = this.createJob("run", session);
+		const job = this.createJob(jobId, "run", session);
 		const settings = session.pi.settingsManager;
 		const prefix = settings.getShellCommandPrefix();
 		const shell = createLocalBashOperations({
@@ -243,17 +243,18 @@ export class Bridge {
 		return this.waitJob(job);
 	}
 
-	private call(
-		sessionId: string,
-		name: string,
-		args: unknown,
-	): Promise<JobResult> {
+	private call({
+		sessionId,
+		tool: name,
+		args,
+		jobId,
+	}: Ops["call"]["params"]): Promise<JobResult> {
 		const session = this.session(sessionId);
 		const definition = session.pi.getToolDefinition(name);
 		if (!definition) {
 			throw new Error(`未知工具：${name}。用 list_capabilities 查看可用工具`);
 		}
-		const job = this.createJob("call", session);
+		const job = this.createJob(jobId, "call", session);
 		// 扩展工具执行时需要会话上下文，模型发起的调用由 Pi 自动传入
 		const tool: AgentTool = {
 			name: definition.name,
@@ -371,9 +372,8 @@ export class Bridge {
 		};
 	}
 
-	private createJob(kind: Job["kind"], session: Session): Job {
+	private createJob(id: string, kind: Job["kind"], session: Session): Job {
 		mkdirSync(JOBS_DIR, { recursive: true });
-		const id = this.newId();
 		const job: Job = {
 			id,
 			kind,
@@ -434,7 +434,7 @@ export class Bridge {
 		}
 	}
 
-	/** 会话和任务 ID 以设备 ID 开头，Worker 据此转发。 */
+	/** 会话 ID 以设备 ID 开头，Worker 据此转发；任务 ID 由 Worker 生成。 */
 	private newId(): string {
 		return `${this.deviceId}.${randomBytes(6).toString("hex")}`;
 	}

@@ -9,6 +9,7 @@ import {
 	type Ops,
 	PROTOCOL_VERSION,
 } from "@pi-bridge/protocol";
+import { randomId } from "./stubs.ts";
 
 export type Result<T> = { ok: true; result: T } | { ok: false; error: string };
 
@@ -19,6 +20,8 @@ interface Pending {
 	ws: WebSocket;
 	resolve: (result: Result<unknown>) => void;
 	timer: ReturnType<typeof setTimeout>;
+	/** 连接中断或超时时返回的错误。 */
+	lostError: string;
 }
 
 type DeviceRow = {
@@ -137,27 +140,18 @@ export class UserHub extends DurableObject<Env> {
 		let target: DeviceInfo | undefined;
 		if (device) {
 			target = online.find((d) => d.name === device || d.id === device);
-			if (!target) {
-				return {
-					ok: false,
-					error: `设备「${device}」不在线。在线设备：${names || "无"}`,
-				};
-			}
 		} else if (online.length === 1) {
 			target = online[0];
-		} else if (online.length === 0) {
-			return {
-				ok: false,
-				error: "没有在线的设备。请在电脑上运行 pi-bridge start",
-			};
-		} else {
-			return {
-				ok: false,
-				error: `有多台设备在线，请用 device 参数指定：${names}`,
-			};
 		}
 		if (!target) {
-			return { ok: false, error: "没有在线的设备" };
+			return {
+				ok: false,
+				error: device
+					? `设备「${device}」不在线。在线设备：${names || "无"}`
+					: online.length === 0
+						? "没有在线的设备。请在电脑上运行 pi-bridge start"
+						: `有多台设备在线，请用 device 参数指定：${names}`,
+			};
 		}
 
 		const result = (await this.request(target.id, "open_session", {
@@ -168,7 +162,10 @@ export class UserHub extends DurableObject<Env> {
 			: result;
 	}
 
-	/** 按会话 ID 或任务 ID 的前缀把操作转发到对应设备。 */
+	/**
+	 * 按会话 ID 或任务 ID 的前缀把操作转发到对应设备。
+	 * run 和 call 的任务 ID 由这里生成：连接在等待途中断开时，网页 AI 仍能拿到 job_id 继续查看。
+	 */
 	async forward(
 		op: Exclude<OpName, "open_session">,
 		params: { sessionId: string } | { jobId: string },
@@ -177,6 +174,15 @@ export class UserHub extends DurableObject<Env> {
 		const deviceId = deviceIdOf(id);
 		if (!deviceId) {
 			return { ok: false, error: `ID 无效：${id}` };
+		}
+		if (op === "run" || op === "call") {
+			const jobId = `${deviceId}.${randomId(6)}`;
+			return this.request(
+				deviceId,
+				op,
+				{ ...params, jobId },
+				`设备连接中断，任务可能仍在运行。设备重新连接后可以用 wait 查看结果，或用 cancel 停止。job_id: ${jobId}`,
+			);
 		}
 		return this.request(deviceId, op, params);
 	}
@@ -192,6 +198,7 @@ export class UserHub extends DurableObject<Env> {
 		deviceId: string,
 		op: OpName,
 		params: unknown,
+		lostError = "设备连接中断或没有响应，请稍后重试",
 	): Promise<Result<unknown>> {
 		const ws = this.socketOf(deviceId);
 		if (!ws) {
@@ -213,9 +220,9 @@ export class UserHub extends DurableObject<Env> {
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
-				resolve({ ok: false, error: "设备没有响应，请稍后重试" });
+				resolve({ ok: false, error: lostError });
 			}, REQUEST_TIMEOUT_MS);
-			this.pending.set(id, { ws, resolve, timer });
+			this.pending.set(id, { ws, resolve, timer, lostError });
 			ws.send(JSON.stringify({ type: "request", id, op, params }));
 		});
 	}
@@ -235,7 +242,7 @@ export class UserHub extends DurableObject<Env> {
 				this.pending.delete(id);
 				pending.resolve({
 					ok: false,
-					error: "设备连接中断，操作可能已在电脑上开始执行",
+					error: pending.lostError,
 				});
 			}
 		}

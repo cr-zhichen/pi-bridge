@@ -23,7 +23,7 @@ const HELP = `pi-bridge ${pkg.version}
 让 Claude 和 ChatGPT 网页版调用这台电脑上的 Pi。
 
 用法：
-  pi-bridge login <服务地址> <密钥>   连接到 pi-bridge 服务
+  pi-bridge login <服务地址> <密钥>   登录 pi-bridge 服务
   pi-bridge start                     在前台运行
   pi-bridge service install           开机后自动在后台运行
   pi-bridge service uninstall         取消开机自动运行
@@ -33,8 +33,6 @@ const HELP = `pi-bridge ${pkg.version}
   -h, --help      显示帮助
   -v, --version   显示版本
 `;
-
-class UsageError extends Error {}
 
 const { values, positionals } = parseArgs({
 	allowPositionals: true,
@@ -70,7 +68,7 @@ async function main([command, ...args]: string[]): Promise<void> {
 		case "status":
 			return status();
 		default:
-			throw new UsageError(
+			throw new Error(
 				`未知命令：${command}。运行 pi-bridge --help 查看可用命令`,
 			);
 	}
@@ -78,7 +76,7 @@ async function main([command, ...args]: string[]): Promise<void> {
 
 async function login([server, token]: string[]): Promise<void> {
 	if (!server || !token) {
-		throw new UsageError("用法：pi-bridge login <服务地址> <密钥>");
+		throw new Error("用法：pi-bridge login <服务地址> <密钥>");
 	}
 	let url: URL;
 	try {
@@ -95,7 +93,7 @@ async function login([server, token]: string[]): Promise<void> {
 		throw new Error("密钥无效或用户已被禁用");
 	}
 	if (status !== 200) {
-		throw new Error(`服务返回错误（HTTP ${status}），请检查服务地址`);
+		throw new Error("服务地址不正确或服务暂时不可用，请检查服务地址后重试");
 	}
 
 	const previous = loadConfig();
@@ -106,7 +104,7 @@ async function login([server, token]: string[]): Promise<void> {
 		deviceName: previous?.deviceName ?? defaultDeviceName(),
 	};
 	saveConfig(config);
-	console.log(`已登录 ${normalized}，设备名称：${config.deviceName}`);
+	console.log(`已登录 ${normalized}，电脑名称：${config.deviceName}`);
 
 	if (serviceInstalled()) {
 		installService();
@@ -144,7 +142,7 @@ function service(action: string | undefined): void {
 		uninstallService();
 		console.log("已取消开机自动运行，后台进程已停止");
 	} else {
-		throw new UsageError("用法：pi-bridge service install | uninstall");
+		throw new Error("用法：pi-bridge service install | uninstall");
 	}
 }
 
@@ -164,7 +162,7 @@ async function status(): Promise<void> {
 		connection = "无法连接到服务";
 	}
 	console.log(`服务地址：${config.server}
-设备名称：${config.deviceName}
+电脑名称：${config.deviceName}
 连接状态：${connection}
 开机自动运行：${serviceInstalled() ? "已开启" : "未开启"}
 

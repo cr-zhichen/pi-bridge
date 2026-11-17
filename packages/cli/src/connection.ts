@@ -42,8 +42,8 @@ export function connect(
 		if (status !== 200) {
 			log(
 				status === undefined
-					? "无法连接到服务"
-					: `服务返回错误（HTTP ${status}）`,
+					? "无法连接到服务，请检查网络"
+					: "服务暂时不可用，稍后会自动重试",
 			);
 			retry();
 			return;
@@ -82,7 +82,7 @@ export function connect(
 		ws.onopen = () => {
 			retries = 0;
 			lastMessage = Date.now();
-			log(`已连接到 ${config.server}，设备名称：${config.deviceName}`);
+			log(`已连接到 ${config.server}，电脑名称：${config.deviceName}`);
 			heartbeat = setInterval(() => {
 				if (Date.now() - lastMessage > DEAD_AFTER_MS) {
 					ws.close();
