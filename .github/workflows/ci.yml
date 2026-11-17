@@ -23,3 +23,15 @@ jobs:
       - name: 检查服务端能单独部署
         working-directory: packages/server
         run: pnpm exec wrangler deploy --dry-run --outdir /tmp/worker
+
+  # 在支持的最低版本和最新版本的 Pi 上检查 CLI；最低版本与 packages/cli/src/pi.ts 中的 MIN_PI_VERSION 一致
+  pi-compat:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pi: ["0.99.0", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v5
+      - run: mise run install
+      - run: mise run test-pi -- ${{ matrix.pi }}

@@ -1,8 +1,8 @@
 /**
  * 把 CLI 打包到 dist/package，发布时在这个目录运行 npm publish。
  *
- * Node 不会对 node_modules 里的 TypeScript 去除类型，所以发布前用 esbuild 打包成一个 JavaScript 文件；
- * Pi 的 SDK 仍作为依赖由 npm 安装。
+ * Node 不会对 node_modules 里的 TypeScript 去除类型，所以发布前用 esbuild 打包成一个 JavaScript 文件。
+ * 运行时加载用户电脑上已安装的 Pi，安装包不包含 Pi，也没有其他依赖。
  */
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +40,6 @@ writeFileSync(
 			type: "module",
 			bin: { "pi-bridge": "main.js" },
 			engines: pkg.engines,
-			dependencies: pkg.dependencies,
 		},
 		null,
 		"\t",

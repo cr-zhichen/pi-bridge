@@ -13,6 +13,7 @@ import {
 	saveConfig,
 } from "./config.ts";
 import { connect, fetchDevices } from "./connection.ts";
+import { findPi, loadPi, piProblem } from "./pi.ts";
 import {
 	installService,
 	serviceInstalled,
@@ -168,9 +169,18 @@ async function rename([name]: string[]): Promise<void> {
 	}
 }
 
-function start(): void {
+async function start(): Promise<void> {
 	const config = requireConfig();
-	const bridge = new Bridge(config.deviceId);
+	const pi = findPi();
+	const problem = piProblem(pi);
+	if (problem || !pi) {
+		// macOS、Linux 的后台服务以失败退出后会被系统重新启动，安装或升级 Pi 后自动恢复
+		log(problem ?? "");
+		process.exitCode = 1;
+		return;
+	}
+	const bridge = new Bridge(config.deviceId, await loadPi(pi));
+	log(`使用 Pi ${pi.version}`);
 	const stop = () => {
 		bridge.shutdown();
 		process.exit(0);
@@ -210,6 +220,10 @@ async function update(): Promise<void> {
 function service(action: string | undefined): void {
 	if (action === "install") {
 		requireConfig();
+		const problem = piProblem(findPi());
+		if (problem) {
+			throw new Error(problem);
+		}
 		installService();
 		const logs = serviceLogHint();
 		console.log("已设置为开机后自动在后台运行，现在已经启动");
@@ -231,11 +245,13 @@ async function status(): Promise<void> {
 		latestVersion(),
 	]);
 	const connection = connectionText(devices, config.deviceId);
+	const pi = findPi();
 	const version =
 		latest && isNewer(latest, pkg.version)
 			? `${pkg.version}（可更新到 ${latest}，运行 pi-bridge update）`
 			: pkg.version;
 	console.log(`版本：${version}
+Pi：${piProblem(pi) ?? pi?.version}
 服务地址：${config.server}
 电脑名称：${config.deviceName}
 连接状态：${connection}

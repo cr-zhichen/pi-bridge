@@ -33,7 +33,7 @@ pi-bridge 让 Claude 和 ChatGPT 网页版调用你电脑上的 [Pi](https://pi.
 
 ## 连接电脑
 
-电脑需要先安装 [Pi](https://pi.dev) 和 [Node.js](https://nodejs.org) 22.19 或更高版本。安装命令行：
+电脑需要先安装 [Pi](https://pi.dev) 0.99 或更高版本，以及 [Node.js](https://nodejs.org) 22.19 或更高版本。pi-bridge 使用电脑上安装的 Pi，网页版能用的扩展、Skills 和 MCP 与终端里的 `pi` 相同。安装命令行：
 
 ```bash
 npm install -g @zgccrui/pi-bridge

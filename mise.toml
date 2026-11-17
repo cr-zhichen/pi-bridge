@@ -30,6 +30,10 @@ run = [
 description = "运行单元测试"
 run = "node --test packages/cli/src/*.test.ts"
 
+[tasks.test-pi]
+description = "在指定版本的 Pi 上检查 CLI，版本跟在 -- 之后，不指定时用最新版"
+run = "node packages/cli/scripts/pi-compat.ts"
+
 [tasks.build-cli]
 description = "打包 CLI 到 packages/cli/dist/package"
 run = "node packages/cli/build.ts"

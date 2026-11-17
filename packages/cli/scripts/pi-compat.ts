@@ -1,0 +1,134 @@
+/**
+ * 在指定版本的 Pi 上检查 pi-bridge 能否正常工作：mise run test-pi -- <版本>，不指定时用最新版。
+ *
+ * 用 npm 把 Pi 全局安装到临时目录，并以临时目录作为主目录运行，不读写这台电脑上的 Pi 设置。
+ * 主目录里放一个注册了工具的扩展，检查扩展工具也能调用。
+ */
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import type { JobResult, Request } from "../../server/src/protocol.ts";
+import { Bridge } from "../src/bridge.ts";
+import { findPi, loadPi, piProblem } from "../src/pi.ts";
+
+if (process.argv[2] === "--run") {
+	await check();
+} else {
+	const version = process.argv[2] ?? "latest";
+	const home = mkdtempSync(join(tmpdir(), "pi-bridge-compat-"));
+	const prefix = join(home, "npm");
+	execFileSync(
+		"npm",
+		[
+			"install",
+			"-g",
+			"--ignore-scripts",
+			"--no-fund",
+			"--no-audit",
+			"--prefix",
+			prefix,
+			`@earendil-works/pi-coding-agent@${version}`,
+		],
+		{ stdio: "inherit" },
+	);
+	const extensions = join(home, ".pi", "agent", "extensions");
+	mkdirSync(extensions, { recursive: true });
+	writeFileSync(
+		join(extensions, "echo.ts"),
+		`import { Type } from "typebox";
+export default function (pi) {
+	pi.registerTool({
+		name: "bridge_echo",
+		label: "Echo",
+		description: "Echo text",
+		parameters: Type.Object({ text: Type.String() }),
+		async execute(_id, params) {
+			return { content: [{ type: "text", text: "echo:" + params.text }], details: {} };
+		},
+	});
+}
+`,
+	);
+	execFileSync(process.execPath, [import.meta.filename, "--run"], {
+		stdio: "inherit",
+		cwd: home,
+		env: {
+			...process.env,
+			HOME: home,
+			USERPROFILE: home,
+			PATH: [join(prefix, "bin"), prefix, process.env.PATH].join(delimiter),
+		},
+	});
+}
+
+async function check(): Promise<void> {
+	const pi = findPi();
+	const problem = piProblem(pi);
+	if (problem || !pi) {
+		throw new Error(problem);
+	}
+	console.log(`Pi ${pi.version}：${pi.dir}`);
+	const bridge = new Bridge("compat", await loadPi(pi));
+	let n = 0;
+	const send = async <T>(op: Request["op"], params: unknown): Promise<T> => {
+		const response = await bridge.handle({
+			type: "request",
+			id: String(++n),
+			op,
+			params,
+		} as Request);
+		if (!response.ok) {
+			throw new Error(`${op}：${response.error}`);
+		}
+		return response.result as T;
+	};
+
+	writeFileSync("hello.txt", "hello from pi-bridge\n");
+	const { sessionId } = await send<{ sessionId: string }>("open_session", {
+		cwd: process.cwd(),
+	});
+	const { tools } = await send<{ tools: { name: string }[] }>(
+		"list_capabilities",
+		{ sessionId },
+	);
+	const names = tools.map((t) => t.name);
+	for (const name of ["read", "bridge_echo"]) {
+		if (!names.includes(name)) {
+			throw new Error(`工具列表中没有 ${name}：${names.join(", ")}`);
+		}
+	}
+	const expect = (result: JobResult, text: string) => {
+		if (result.isError || !result.output.includes(text)) {
+			throw new Error(`结果不符合预期：${JSON.stringify(result)}`);
+		}
+	};
+	expect(
+		await send("call", {
+			sessionId,
+			tool: "read",
+			args: { path: "hello.txt" },
+			jobId: "compat.read",
+		}),
+		"hello from pi-bridge",
+	);
+	expect(
+		await send("call", {
+			sessionId,
+			tool: "bridge_echo",
+			args: { text: "ok" },
+			jobId: "compat.echo",
+		}),
+		"echo:ok",
+	);
+	expect(
+		await send("run", {
+			sessionId,
+			command: "echo bridge-run",
+			jobId: "compat.run",
+		}),
+		"bridge-run",
+	);
+	bridge.shutdown();
+	console.log(`Pi ${pi.version} 检查通过：${names.length} 个工具`);
+}

@@ -12,20 +12,8 @@ import {
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import {
-	type AgentTool,
-	type AgentToolCall,
-	runToolCall,
-} from "@earendil-works/pi-agent-core";
-import {
-	type AgentSession,
-	createAgentSession,
-	createLocalBashOperations,
-	createMcpExtension,
-	DefaultResourceLoader,
-	getAgentDir,
-	SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentTool, AgentToolCall } from "@earendil-works/pi-agent-core";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type {
 	Capabilities,
 	Image,
@@ -37,6 +25,7 @@ import type {
 import { WAIT_MS } from "../../server/src/protocol.ts";
 import { JOBS_DIR } from "./config.ts";
 import { clip, readLog } from "./output.ts";
+import type { PiSdk } from "./pi.ts";
 
 /** 会话空闲这么久且没有运行中的任务时释放。 */
 const SESSION_IDLE_MS = 30 * 60_000;
@@ -76,12 +65,14 @@ interface Job {
 /** 在本机维护会话和任务，执行 Worker 转发来的操作。 */
 export class Bridge {
 	deviceId: string;
+	pi: PiSdk;
 	sessions = new Map<string, Session>();
 	jobs = new Map<string, Job>();
 	sweeper: NodeJS.Timeout;
 
-	constructor(deviceId: string) {
+	constructor(deviceId: string, pi: PiSdk) {
 		this.deviceId = deviceId;
+		this.pi = pi;
 		this.sweeper = setInterval(() => this.releaseIdleSessions(), 60_000);
 		removeOldJobLogs();
 	}
@@ -141,16 +132,38 @@ export class Bridge {
 			};
 		}
 
-		const resourceLoader = new DefaultResourceLoader({
+		const { sdk } = this.pi;
+		const resourceLoader = new sdk.DefaultResourceLoader({
 			cwd,
-			agentDir: getAgentDir(),
-			extensionFactories: [createMcpExtension()],
+			agentDir: sdk.getAgentDir(),
+			// 与 pi 命令行相同的内置扩展：用户安装了注册同名工具或命令的扩展（例如另一个 MCP 扩展）时，
+			// 由那个扩展取代内置的
+			extensionFactories: [
+				{
+					name: "codemode",
+					factory: sdk.createCodemodeExtension(),
+					replaceable: true,
+					builtin: true,
+				},
+				{
+					name: "tool-search",
+					factory: sdk.createToolSearchExtension(),
+					replaceable: true,
+					builtin: true,
+				},
+				{
+					name: "mcp",
+					factory: sdk.createMcpExtension(),
+					replaceable: true,
+					builtin: true,
+				},
+			],
 		});
 		await resourceLoader.reload();
-		const { session: pi } = await createAgentSession({
+		const { session: pi } = await sdk.createAgentSession({
 			cwd,
 			resourceLoader,
-			sessionManager: SessionManager.inMemory(cwd),
+			sessionManager: sdk.SessionManager.inMemory(cwd),
 		});
 		// 触发 session_start，扩展在这里完成初始化，MCP 服务器开始连接
 		await pi.bindExtensions({});
@@ -207,7 +220,7 @@ export class Bridge {
 		const job = this.createJob(jobId, "run", session);
 		const settings = session.pi.settingsManager;
 		const prefix = settings.getShellCommandPrefix();
-		const shell = createLocalBashOperations({
+		const shell = this.pi.sdk.createLocalBashOperations({
 			shellPath: settings.getShellPath(),
 		});
 
@@ -272,21 +285,23 @@ export class Bridge {
 				),
 		};
 
-		// runToolCall 只把 assistantMessage 和 context 传给钩子，这里不设钩子
-		job.done = runToolCall(
-			{
-				type: "toolCall",
-				id: job.id,
-				name,
-				arguments: (args ?? {}) as AgentToolCall["arguments"],
-			},
-			{
-				tools: [tool],
-				assistantMessage: undefined as never,
-				context: { messages: [], tools: [tool] },
-				signal: job.abort.signal,
-			},
-		)
+		// Pi 的 ctx.executeTool 只能在模型发起的工具调用中使用，这里直接运行工具：
+		// 经过参数校验，不经过扩展的 tool_call、tool_result 钩子
+		job.done = this.pi.core
+			.runToolCall(
+				{
+					type: "toolCall",
+					id: job.id,
+					name,
+					arguments: (args ?? {}) as AgentToolCall["arguments"],
+				},
+				{
+					tools: [tool],
+					assistantMessage: undefined as never,
+					context: { messages: [], tools: [tool] },
+					signal: job.abort.signal,
+				},
+			)
 			.then(({ result, isError }) => {
 				const text: string[] = [];
 				const images: Image[] = [];
