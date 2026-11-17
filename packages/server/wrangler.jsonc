@@ -1,0 +1,20 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "pi-bridge",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-11-17",
+	"observability": {
+		"enabled": true,
+		"logs": {
+			// 请求日志会记录完整 URL，而 MCP 地址的路径里就是用户密钥
+			"invocation_logs": false
+		}
+	},
+	"durable_objects": {
+		"bindings": [{ "name": "USER_HUB", "class_name": "UserHub" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserHub"] }],
+	"secrets": {
+		"required": ["ADMIN_KEY"]
+	}
+}

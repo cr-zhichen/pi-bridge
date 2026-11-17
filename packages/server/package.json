@@ -1,0 +1,17 @@
+{
+	"name": "@pi-bridge/server",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
+		"cf-types": "wrangler types",
+		"typecheck": "tsc -p ."
+	},
+	"devDependencies": {
+		"wrangler": "^4.164.0"
+	},
+	"dependencies": {
+		"@pi-bridge/protocol": "workspace:*"
+	}
+}

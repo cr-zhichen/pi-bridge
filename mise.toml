@@ -1,0 +1,23 @@
+[tools]
+node = "24.16.0"
+pnpm = "10.17.0"
+
+[tasks.dev]
+description = "在本地运行 Worker"
+run = "pnpm --filter @pi-bridge/server dev"
+
+[tasks.cli]
+description = "从源码运行 CLI，参数跟在 -- 之后"
+run = "node packages/cli/src/main.ts"
+
+[tasks.cf-types]
+description = "修改 wrangler.jsonc 后重新生成 Worker 类型"
+run = "pnpm --filter @pi-bridge/server cf-types"
+
+[tasks.check]
+description = "格式、Lint 与类型检查"
+run = ["pnpm exec biome check .", "pnpm -r typecheck"]
+
+[tasks.deploy]
+description = "部署 Worker"
+run = "pnpm --filter @pi-bridge/server deploy"
