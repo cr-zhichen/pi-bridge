@@ -88,15 +88,13 @@ export class Bridge {
 		}
 	}
 
-	/** 退出前停止所有任务，避免留下子进程。 */
-	shutdown(): void {
+	/** 退出前停止所有任务，避免留下子进程；再关闭会话，让扩展清理资源。 */
+	async shutdown(): Promise<void> {
 		clearInterval(this.sweeper);
 		for (const job of this.jobs.values()) {
 			job.abort.abort();
 		}
-		for (const session of this.sessions.values()) {
-			session.pi.dispose();
-		}
+		await Promise.all([...this.sessions.values()].map(closeSession));
 	}
 
 	private dispatch(request: Request): Promise<Ops[Request["op"]]["result"]> {
@@ -211,17 +209,43 @@ export class Bridge {
 		};
 	}
 
-	private run({
+	/**
+	 * 网页 AI 运行命令相当于模型调用 bash 工具，按 bash 工具触发扩展的钩子：
+	 * tool_call 可以阻止命令或修改命令内容。
+	 */
+	private async run({
 		sessionId,
 		command,
 		jobId,
 	}: Ops["run"]["params"]): Promise<JobResult> {
 		const session = this.session(sessionId);
+		const runner = session.pi.extensionRunner;
+		const input = { command };
+		const decision = runner.hasHandlers("tool_call")
+			? await runner.emitToolCall({
+					type: "tool_call",
+					toolName: "bash",
+					toolCallId: jobId,
+					input,
+				})
+			: undefined;
+		if (decision?.block) {
+			throw new Error(
+				`命令被 Pi 扩展阻止${decision.reason ? `：${decision.reason}` : ""}`,
+			);
+		}
+
 		const job = this.createJob(jobId, "run", session);
 		const settings = session.pi.settingsManager;
 		const prefix = settings.getShellCommandPrefix();
 		const shell = this.pi.sdk.createLocalBashOperations({
 			shellPath: settings.getShellPath(),
+		});
+		await runner.emit({
+			type: "tool_execution_start",
+			toolCallId: job.id,
+			toolName: "bash",
+			args: input,
 		});
 
 		const fd = openSync(job.logPath, "w");
@@ -230,10 +254,14 @@ export class Bridge {
 			job.written += data.length;
 		};
 		job.done = shell
-			.exec(prefix ? `${prefix}\n${command}` : command, session.cwd, {
-				onData: write,
-				signal: job.abort.signal,
-			})
+			.exec(
+				prefix ? `${prefix}\n${input.command}` : input.command,
+				session.cwd,
+				{
+					onData: write,
+					signal: job.abort.signal,
+				},
+			)
 			.then(
 				({ exitCode }) => {
 					job.exitCode = exitCode;
@@ -249,11 +277,47 @@ export class Bridge {
 					}
 				},
 			)
-			.finally(() => {
+			.finally(async () => {
 				closeSync(fd);
+				await this.emitRunResult(job, input);
 				this.finish(job);
 			});
 		return this.waitJob(job);
+	}
+
+	/**
+	 * 命令结束后触发 tool_result、tool_execution_end。输出在运行中已经陆续返回给网页 AI，
+	 * 扩展对结果的修改不再生效。
+	 */
+	private async emitRunResult(
+		job: Job,
+		input: { command: string },
+	): Promise<void> {
+		const runner = job.session.pi.extensionRunner;
+		const output = readLog(job.logPath, 0, job.written, true).text;
+		const result = {
+			content: [{ type: "text" as const, text: output }],
+			details: undefined,
+		};
+		const isError = job.exitCode !== 0;
+		if (runner.hasHandlers("tool_result")) {
+			await runner.emitToolResult({
+				type: "tool_result",
+				toolName: "bash",
+				toolCallId: job.id,
+				input,
+				...result,
+				isError,
+			});
+		}
+		await runner.emit({
+			type: "tool_execution_end",
+			toolCallId: job.id,
+			toolName: "bash",
+			result,
+			isError,
+			durationMs: Date.now() - job.startedAt,
+		});
 	}
 
 	private call({
@@ -268,6 +332,7 @@ export class Bridge {
 			throw new Error(`未知工具：${name}。用 list_capabilities 查看可用工具`);
 		}
 		const job = this.createJob(jobId, "call", session);
+		const runner = session.pi.extensionRunner;
 		// 扩展工具执行时需要会话上下文，模型发起的调用由 Pi 自动传入
 		const tool: AgentTool = {
 			name: definition.name,
@@ -281,14 +346,20 @@ export class Bridge {
 					params as never,
 					signal,
 					onUpdate,
-					session.pi.extensionRunner.createToolContext(id, signal),
+					runner.createToolContext(id, signal),
 				),
 		};
 
-		// Pi 的 ctx.executeTool 只能在模型发起的工具调用中使用，这里直接运行工具：
-		// 经过参数校验，不经过扩展的 tool_call、tool_result 钩子
-		job.done = this.pi.core
-			.runToolCall(
+		// Pi 的 ctx.executeTool 只能在模型发起的工具调用中使用，这里直接运行工具，
+		// 并像模型发起的调用一样触发扩展的钩子：tool_call 可以阻止调用或修改参数，tool_result 可以修改结果
+		job.done = (async () => {
+			await runner.emit({
+				type: "tool_execution_start",
+				toolCallId: job.id,
+				toolName: name,
+				args,
+			});
+			const outcome = await this.pi.core.runToolCall(
 				{
 					type: "toolCall",
 					id: job.id,
@@ -300,21 +371,52 @@ export class Bridge {
 					assistantMessage: undefined as never,
 					context: { messages: [], tools: [tool] },
 					signal: job.abort.signal,
+					beforeToolCall: async ({ toolCall, args }) =>
+						runner.hasHandlers("tool_call")
+							? runner.emitToolCall({
+									type: "tool_call",
+									toolName: toolCall.name,
+									toolCallId: toolCall.id,
+									input: args as Record<string, unknown>,
+								})
+							: undefined,
+					afterToolCall: async ({ toolCall, args, result, isError }) =>
+						runner.hasHandlers("tool_result")
+							? runner.emitToolResult({
+									type: "tool_result",
+									toolName: toolCall.name,
+									toolCallId: toolCall.id,
+									input: args as Record<string, unknown>,
+									content: result.content,
+									details: result.details,
+									...(result.structuredContent === undefined
+										? {}
+										: { structuredContent: result.structuredContent }),
+									isError,
+									usage: result.usage,
+								})
+							: undefined,
 				},
-			)
-			.then(({ result, isError }) => {
-				const text: string[] = [];
-				const images: Image[] = [];
-				for (const block of result.content) {
-					if (block.type === "text") {
-						text.push(block.text);
-					} else {
-						images.push({ data: block.data, mimeType: block.mimeType });
-					}
+			);
+			await runner.emit({
+				type: "tool_execution_end",
+				toolCallId: job.id,
+				toolName: name,
+				result: outcome.result,
+				isError: outcome.isError,
+				durationMs: outcome.durationMs,
+			});
+			const text: string[] = [];
+			const images: Image[] = [];
+			for (const block of outcome.result.content) {
+				if (block.type === "text") {
+					text.push(block.text);
+				} else {
+					images.push({ data: block.data, mimeType: block.mimeType });
 				}
-				job.result = { text: text.join("\n"), images, isError };
-			})
-			.finally(() => this.finish(job));
+			}
+			job.result = { text: text.join("\n"), images, isError: outcome.isError };
+		})().finally(() => this.finish(job));
 		return this.waitJob(job);
 	}
 
@@ -440,11 +542,11 @@ export class Bridge {
 			if (running || now - session.lastUsed < SESSION_IDLE_MS) {
 				continue;
 			}
-			session.pi.dispose();
 			for (const id of session.jobs) {
 				this.jobs.delete(id);
 			}
 			this.sessions.delete(session.id);
+			void closeSession(session);
 			log(`释放空闲会话 ${session.cwd}`);
 		}
 	}
@@ -453,6 +555,15 @@ export class Bridge {
 	private newId(): string {
 		return `${this.deviceId}.${randomBytes(6).toString("hex")}`;
 	}
+}
+
+/** 像退出 pi 时一样先触发 session_shutdown，扩展在这里断开 MCP 服务器等资源。 */
+async function closeSession(session: Session): Promise<void> {
+	const runner = session.pi.extensionRunner;
+	if (runner.hasHandlers("session_shutdown")) {
+		await runner.emit({ type: "session_shutdown", reason: "quit" });
+	}
+	session.pi.dispose();
 }
 
 function resolveDirectory(input: string): string {

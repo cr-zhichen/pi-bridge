@@ -6,6 +6,8 @@
  * - 网页 AI 可用的工具：open_session、list_capabilities、call、run、wait、cancel。
  *   Pi 的 read、grep、edit 等通过 call 调用；Skills 由 list_capabilities 给出 SKILL.md 路径，
  *   网页 AI 读取后按说明操作。
+ * - call 和 run 像模型发起的工具调用一样触发 Pi 扩展的钩子（run 按 bash 工具处理），
+ *   扩展可以阻止调用或修改参数；会话释放时触发 session_shutdown。
  * - 会话 ID 以 "<设备 ID>." 开头，由 CLI 生成；同一目录在多个聊天中共用一个会话。
  * - 任务 ID 同样以设备 ID 开头，由 Worker 生成：连接在等待途中断开时，返回的错误里仍带着
  *   job_id，设备重连后可以继续 wait 或 cancel。电脑关机或 CLI 退出后不恢复。

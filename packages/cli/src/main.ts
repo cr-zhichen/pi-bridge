@@ -181,8 +181,8 @@ async function start(): Promise<void> {
 	}
 	const bridge = new Bridge(config.deviceId, await loadPi(pi));
 	log(`使用 Pi ${pi.version}`);
-	const stop = () => {
-		bridge.shutdown();
+	const stop = async () => {
+		await bridge.shutdown();
 		process.exit(0);
 	};
 	process.on("SIGINT", stop);

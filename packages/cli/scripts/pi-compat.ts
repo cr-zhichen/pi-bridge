@@ -2,7 +2,7 @@
  * 在指定版本的 Pi 上检查 pi-bridge 能否正常工作：mise run test-pi -- <版本>，不指定时用最新版。
  *
  * 用 npm 把 Pi 全局安装到临时目录，并以临时目录作为主目录运行，不读写这台电脑上的 Pi 设置。
- * 主目录里放一个注册了工具的扩展，检查扩展工具也能调用。
+ * 主目录里放一个扩展：注册工具，检查扩展工具也能调用；注册钩子，检查调用会触发扩展的钩子。
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -46,6 +46,25 @@ export default function (pi) {
 		async execute(_id, params) {
 			return { content: [{ type: "text", text: "echo:" + params.text }], details: {} };
 		},
+	});
+	const events = (globalThis.bridgeEvents ??= []);
+	for (const type of ["tool_execution_start", "tool_execution_end", "tool_result", "session_shutdown"]) {
+		pi.on(type, (event) => {
+			events.push(event.toolName ? type + ":" + event.toolName : type);
+		});
+	}
+	pi.on("tool_call", (event) => {
+		if (event.toolName === "bridge_echo" && event.input.text === "block") {
+			return { block: true, reason: "blocked-by-hook" };
+		}
+		if (event.toolName === "bash") {
+			event.input.command = event.input.command.replace("hook-me", "hooked");
+		}
+	});
+	pi.on("tool_result", (event) => {
+		if (event.toolName === "bridge_echo") {
+			return { content: [{ type: "text", text: "after:" + event.content[0].text }] };
+		}
 	});
 }
 `,
@@ -119,16 +138,39 @@ async function check(): Promise<void> {
 			args: { text: "ok" },
 			jobId: "compat.echo",
 		}),
-		"echo:ok",
+		"after:echo:ok",
 	);
+	const blocked = await send<JobResult>("call", {
+		sessionId,
+		tool: "bridge_echo",
+		args: { text: "block" },
+		jobId: "compat.block",
+	});
+	if (!blocked.isError || !blocked.output.includes("blocked-by-hook")) {
+		throw new Error(`tool_call 没有阻止调用：${JSON.stringify(blocked)}`);
+	}
 	expect(
 		await send("run", {
 			sessionId,
-			command: "echo bridge-run",
+			command: "echo hook-me",
 			jobId: "compat.run",
 		}),
-		"bridge-run",
+		"hooked",
 	);
-	bridge.shutdown();
+	await bridge.shutdown();
+	const events = (globalThis as { bridgeEvents?: string[] }).bridgeEvents ?? [];
+	for (const event of [
+		"tool_execution_start:bridge_echo",
+		"tool_result:bridge_echo",
+		"tool_execution_end:bridge_echo",
+		"tool_execution_start:bash",
+		"tool_result:bash",
+		"tool_execution_end:bash",
+		"session_shutdown",
+	]) {
+		if (!events.includes(event)) {
+			throw new Error(`没有触发 ${event}：${events.join(", ")}`);
+		}
+	}
 	console.log(`Pi ${pi.version} 检查通过：${names.length} 个工具`);
 }
