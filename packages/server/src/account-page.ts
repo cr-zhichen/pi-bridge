@@ -1,4 +1,4 @@
-import { BRAND, PAGE_HEAD, PAGE_SCRIPT } from "./page.ts";
+import { BRAND, PAGE_HEAD, PAGE_SCRIPT, PROJECT_ICON_LINK } from "./page.ts";
 
 const PASSWORD_FIELDS = `
 				<div class="field"><span class="label">当前密码</span><input class="input" name="current" type="password" autocomplete="current-password" required></div>
@@ -14,31 +14,30 @@ ${PAGE_HEAD}
 </head>
 <body>
 
-<div id="view-login" class="center" hidden>
-	<div class="auth">
-		<form id="login-form" class="card">
-			${BRAND}
-			<div id="login-context" class="context" hidden>登录后继续授权连接器</div>
+<div id="view-login" class="auth-page" hidden>
+	<header class="top">${BRAND}<div class="user">${PROJECT_ICON_LINK}</div></header>
+	<main class="auth">
+		<form id="login-form">
 			<h1>登录</h1>
 			<p class="lead">使用管理员为你创建的账号</p>
-			<div class="field"><span class="label">用户名</span><input class="input" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
-			<div class="field"><span class="label">密码</span><input class="input" id="password" type="password" autocomplete="current-password" required></div>
-			<div class="field" style="margin-top:20px"><button class="btn primary wide">登录</button></div>
+			<div id="login-context" class="context" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>登录后继续授权连接器</span></div>
+			<div class="field"><label class="label" for="username">用户名</label><input class="input" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+			<div class="field"><label class="label" for="password">密码</label><input class="input" id="password" type="password" autocomplete="current-password" required></div>
+			<button class="btn primary wide auth-submit">登录</button>
+			<p class="auth-hint">忘记密码请联系管理员重置</p>
 		</form>
-		<p class="foot">账号由管理员创建。忘记密码请联系管理员重置。</p>
-	</div>
+	</main>
 </div>
 
-<div id="view-first" class="center" hidden>
-	<div class="auth">
-		<form id="first-form" class="card password-form">
-			${BRAND}
+<div id="view-first" class="auth-page" hidden>
+	<header class="top">${BRAND}<div class="user"><button class="link logout">退出登录</button></div></header>
+	<main class="auth">
+		<form id="first-form" class="password-form">
 			<h1>设置新密码</h1>
 			<p class="lead">当前是管理员生成的初始密码，修改后才能继续使用。</p>${PASSWORD_FIELDS}
-			<div class="field" style="margin-top:20px"><button class="btn primary wide">保存并继续</button></div>
+			<button class="btn primary wide auth-submit">保存并继续</button>
 		</form>
-		<p class="foot"><button class="link logout">退出登录</button></p>
-	</div>
+	</main>
 </div>
 
 <div id="view-account" hidden>
@@ -48,6 +47,7 @@ ${PAGE_HEAD}
 			<span id="whoami" class="name"></span>
 			<button class="link" id="open-password">修改密码</button>
 			<button class="link logout">退出</button>
+			${PROJECT_ICON_LINK}
 		</div>
 	</header>
 
