@@ -4,8 +4,8 @@
  *
  * - Worker 只保存用户和设备，负责鉴权和转发；会话、任务和完整输出都由 CLI 在本机维护。
  * - 网页 AI 可用的工具：open_session、list_capabilities、call、run、wait、cancel。
- *   Pi 的 read、grep、edit 等通过 call 调用；Skills 由 list_capabilities 给出 SKILL.md 路径，
- *   网页 AI 读取后按说明操作。
+ *   Pi 的 read、grep、edit 等通过 call 调用；Skills 由 open_session 和 list_capabilities
+ *   给出 SKILL.md 路径，网页 AI 读取后按说明操作。
  * - call 和 run 像模型发起的工具调用一样触发 Pi 扩展的钩子（run 按 bash 工具处理），
  *   扩展可以阻止调用或修改参数；会话释放时触发 session_shutdown。
  * - 会话 ID 以 "<设备 ID>." 开头，由 CLI 生成；同一目录在多个聊天中共用一个会话。
@@ -98,7 +98,16 @@ export interface Capabilities {
 export interface Ops {
 	open_session: {
 		params: { cwd: string };
-		result: { sessionId: string; cwd: string; contextFiles: string[] };
+		result: {
+			sessionId: string;
+			cwd: string;
+			contextFiles: string[];
+			/**
+			 * 和 Pi 写进系统提示词的 Skills 相同（不含 disable-model-invocation 的），
+			 * 让网页 AI 一打开会话就知道有哪些 Skill。旧版 CLI 不返回。
+			 */
+			skills?: SkillSummary[];
+		};
 	};
 	list_capabilities: {
 		params: { sessionId: string; tools?: string[] };

@@ -10,6 +10,7 @@ import {
 	type JobResult,
 	type OpName,
 	type Ops,
+	type SkillSummary,
 	WAIT_MS,
 } from "./protocol.ts";
 import type { Result, UserHub } from "./user-hub.ts";
@@ -22,9 +23,10 @@ const INSTRUCTIONS = `pi-bridge 让你在用户的电脑上读写文件、运行
 
 1. 先调用 open_session 打开要操作的目录，之后的调用都带上返回的 session_id。
 2. open_session 会列出该目录适用的项目说明文件（如 AGENTS.md），开始工作前先用 call 调用 read 读取它们。
-3. 运行命令用 run；读取、搜索、修改文件用 call 调用 read、grep、find、ls、edit、write。
-4. list_capabilities 列出其他可用工具和 Skills。使用 Skill 时先用 read 读取它的 SKILL.md，再按说明操作。
-5. run 和 call 最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id，用 wait 继续获取输出，用 cancel 停止。`;
+3. open_session 还会列出电脑上可用的 Skills。任务符合某个 Skill 的描述时，先用 call 调用 read 读取它的 SKILL.md，再按说明操作。
+4. 运行命令用 run；读取、搜索、修改文件用 call 调用 read、grep、find、ls、edit、write。
+5. list_capabilities 列出扩展和 MCP 服务器提供的其他工具。
+6. run 和 call 最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id，用 wait 继续获取输出，用 cancel 停止。`;
 
 export function handleMcp(request: Request, hub: Hub): Promise<Response> {
 	return createMcpHandler(() => buildServer(hub)).fetch(request);
@@ -43,7 +45,7 @@ function buildServer(hub: Hub): McpServer {
 		{
 			title: "打开目录",
 			description:
-				"在用户电脑的指定目录打开会话，返回 session_id 和该目录适用的项目说明文件。同一目录再次打开会得到同一个会话。",
+				"在用户电脑的指定目录打开会话，返回 session_id、该目录适用的项目说明文件和可用的 Skills。同一目录再次打开会得到同一个会话。",
 			inputSchema: z.object({
 				cwd: z
 					.string()
@@ -60,7 +62,7 @@ function buildServer(hub: Hub): McpServer {
 			if (!result.ok) {
 				return errorResult(result.error);
 			}
-			const { sessionId, deviceName, contextFiles } = result.result;
+			const { sessionId, deviceName, contextFiles, skills } = result.result;
 			const lines = [
 				`session_id: ${sessionId}`,
 				`设备：${deviceName}`,
@@ -71,6 +73,16 @@ function buildServer(hub: Hub): McpServer {
 					"",
 					"项目说明文件（开始前先读取）：",
 					...contextFiles.map((f) => `- ${f}`),
+				);
+			}
+			if (skills === undefined) {
+				// 旧版 CLI 不返回 Skills
+				lines.push("", "可用的 Skills 用 list_capabilities 查看。");
+			} else if (skills.length > 0) {
+				lines.push(
+					"",
+					"可用的 Skills（任务符合描述时，先用 call 调用 read 读取 SKILL.md，再按说明操作）：",
+					...formatSkills(skills),
 				);
 			}
 			return textResult(lines.join("\n"));
@@ -243,15 +255,18 @@ function formatCapabilities({ tools, skills }: Capabilities): string {
 		lines.push(`- ${tool.name}：${oneLine(firstLine(tool.description))}`);
 	}
 	lines.push("", "Skills（用 read 读取路径中的 SKILL.md 后按说明操作）：");
-	for (const skill of skills) {
-		lines.push(
-			`- ${skill.name}：${oneLine(skill.description)}（${skill.path}）`,
-		);
-	}
+	lines.push(...formatSkills(skills));
 	if (skills.length === 0) {
 		lines.push("（无）");
 	}
 	return lines.join("\n");
+}
+
+function formatSkills(skills: SkillSummary[]): string[] {
+	return skills.map(
+		(skill) =>
+			`- ${skill.name}：${oneLine(skill.description)}（${skill.path}）`,
+	);
 }
 
 function firstLine(text: string): string {

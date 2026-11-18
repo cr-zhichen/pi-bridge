@@ -21,6 +21,7 @@ import type {
 	Ops,
 	Request,
 	Response,
+	SkillSummary,
 } from "../../server/src/protocol.ts";
 import { WAIT_MS } from "../../server/src/protocol.ts";
 import { JOBS_DIR } from "./config.ts";
@@ -127,6 +128,7 @@ export class Bridge {
 				sessionId: existing.id,
 				cwd,
 				contextFiles: existing.contextFiles,
+				skills: promptSkills(existing.pi),
 			};
 		}
 
@@ -177,7 +179,12 @@ export class Bridge {
 			jobs: new Set(),
 		};
 		this.sessions.set(session.id, session);
-		return { sessionId: session.id, cwd, contextFiles: session.contextFiles };
+		return {
+			sessionId: session.id,
+			cwd,
+			contextFiles: session.contextFiles,
+			skills: promptSkills(pi),
+		};
 	}
 
 	private listCapabilities(sessionId: string, names?: string[]): Capabilities {
@@ -201,11 +208,7 @@ export class Bridge {
 		}
 		return {
 			tools: tools.map((t) => ({ name: t.name, description: t.description })),
-			skills: pi.resourceLoader.getSkills().skills.map((s) => ({
-				name: s.name,
-				description: s.description,
-				path: s.filePath,
-			})),
+			skills: allSkills(pi).map(toSummary),
 		};
 	}
 
@@ -564,6 +567,28 @@ async function closeSession(session: Session): Promise<void> {
 		await runner.emit({ type: "session_shutdown", reason: "quit" });
 	}
 	session.pi.dispose();
+}
+
+type Skill = ReturnType<
+	AgentSession["resourceLoader"]["getSkills"]
+>["skills"][number];
+
+function allSkills(pi: AgentSession): Skill[] {
+	return pi.resourceLoader.getSkills().skills;
+}
+
+/**
+ * Pi 写进系统提示词的 Skills：标了 disable-model-invocation 的只能由用户点名使用，
+ * 不主动列给模型，list_capabilities 里仍然能查到。
+ */
+function promptSkills(pi: AgentSession): SkillSummary[] {
+	return allSkills(pi)
+		.filter((s) => s.disableModelInvocation !== true)
+		.map(toSummary);
+}
+
+function toSummary(s: Skill): SkillSummary {
+	return { name: s.name, description: s.description, path: s.filePath };
 }
 
 function resolveDirectory(input: string): string {

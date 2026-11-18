@@ -3,12 +3,19 @@
  *
  * 用 npm 把 Pi 全局安装到临时目录，并以临时目录作为主目录运行，不读写这台电脑上的 Pi 设置。
  * 主目录里放一个扩展：注册工具，检查扩展工具也能调用；注册钩子，检查调用会触发扩展的钩子。
+ * 再放两个 Skill，其中一个标了 disable-model-invocation：open_session 只列出另一个，
+ * list_capabilities 两个都列出。
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import type { JobResult, Request } from "../../server/src/protocol.ts";
+import type {
+	Capabilities,
+	JobResult,
+	Ops,
+	Request,
+} from "../../server/src/protocol.ts";
 import { Bridge } from "../src/bridge.ts";
 import { findPi, loadPi, piProblem } from "../src/pi.ts";
 
@@ -32,6 +39,18 @@ if (process.argv[2] === "--run") {
 		],
 		{ stdio: "inherit" },
 	);
+	const testSkills: [string, string][] = [
+		["bridge-visible", ""],
+		["bridge-manual", "disable-model-invocation: true\n"],
+	];
+	for (const [name, extra] of testSkills) {
+		const dir = join(home, ".pi", "agent", "skills", name);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, "SKILL.md"),
+			`---\nname: ${name}\ndescription: Test skill ${name}\n${extra}---\n\nTest.\n`,
+		);
+	}
 	const extensions = join(home, ".pi", "agent", "extensions");
 	mkdirSync(extensions, { recursive: true });
 	writeFileSync(
@@ -104,13 +123,26 @@ async function check(): Promise<void> {
 	};
 
 	writeFileSync("hello.txt", "hello from pi-bridge\n");
-	const { sessionId } = await send<{ sessionId: string }>("open_session", {
+	const opened = await send<Ops["open_session"]["result"]>("open_session", {
 		cwd: process.cwd(),
 	});
-	const { tools } = await send<{ tools: { name: string }[] }>(
-		"list_capabilities",
-		{ sessionId },
-	);
+	const { sessionId } = opened;
+	const { tools, skills } = await send<Capabilities>("list_capabilities", {
+		sessionId,
+	});
+	const skillNames = (list: { name: string }[] | undefined) =>
+		(list ?? [])
+			.map((s) => s.name)
+			.sort()
+			.join(", ");
+	if (skillNames(opened.skills) !== "bridge-visible") {
+		throw new Error(
+			`open_session 的 Skills 不对：${skillNames(opened.skills)}`,
+		);
+	}
+	if (skillNames(skills) !== "bridge-manual, bridge-visible") {
+		throw new Error(`list_capabilities 的 Skills 不对：${skillNames(skills)}`);
+	}
 	const names = tools.map((t) => t.name);
 	for (const name of ["read", "bridge_echo"]) {
 		if (!names.includes(name)) {
