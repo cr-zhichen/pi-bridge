@@ -130,7 +130,6 @@ ${PAGE_HEAD}
 </head>
 <body>
 <div class="auth-page">
-<header class="top">${BRAND}</header>
 <main class="auth">
 	<div class="pair"><span class="icon">${escapeHtml(initial(details.clientName))}</span><span class="line"></span><span class="logo">π</span></div>
 	<h1 style="text-align:center">${name} 想要使用你的电脑</h1>
@@ -180,8 +179,8 @@ ${PAGE_HEAD}
 </head>
 <body>
 <div class="auth-page">
-<header class="top">${BRAND}</header>
 <main class="auth">
+	${BRAND}
 	<h1>无法完成授权</h1>
 	<p class="lead" style="margin:0">${escapeHtml(message)}</p>
 </main>

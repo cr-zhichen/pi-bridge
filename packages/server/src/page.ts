@@ -152,16 +152,18 @@ export const PAGE_STYLE = `
 	.waiting { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
 	.waiting.done { color: var(--ok); }
 
-	/* 登录、授权这类单页：顶栏和账号页一致，表单不套卡片，单独一列放在页面中间 */
-	.auth-page { min-height: 100vh; min-height: 100svh; display: grid; grid-template-rows: auto 1fr; }
-	.auth-page > .top { width: 100%; }
-	.auth { width: 100%; max-width: 408px; margin: 0 auto; padding: 40px 24px 96px; align-self: center; }
+	/* 登录、授权这类单页：不套卡片，品牌和表单排成一列放在页面中间，项目链接放在页面底部 */
+	.auth-page { min-height: 100vh; min-height: 100svh; display: grid; grid-template-rows: 1fr auto; }
+	.auth { width: 100%; max-width: 408px; margin: 0 auto; padding: 48px 24px 72px; align-self: center; }
+	.auth .brand { margin-bottom: 40px; }
 	.auth h1 { font-size: 26px; line-height: 1.3; }
 	.auth .lead { margin: 8px 0 32px; }
 	.auth .field + .field { margin-top: 20px; }
 	.auth .label { margin-bottom: 8px; font-size: 13px; color: var(--text); }
 	.auth .input { height: 44px; padding: 0 14px; }
 	.auth-submit { display: block; height: 44px; margin-top: 28px; }
+	.auth-foot { display: flex; justify-content: center; padding: 0 24px 24px; font-size: 13px; }
+	.repo-link { display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }
 	.auth-hint { margin: 16px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
 	h1 { margin: 0; font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
 	.lead { margin: 6px 0 24px; color: var(--muted); }
@@ -417,6 +419,10 @@ export const BRAND = `<div class="brand"><span class="logo">π</span>pi-bridge</
 const PROJECT_URL = "https://github.com/cr-zhichen/pi-bridge";
 const PROJECT_LABEL = "GitHub 仓库";
 
-export const PROJECT_ICON_LINK = `<a class="link project-link" href="${PROJECT_URL}" target="_blank" rel="noopener" aria-label="${PROJECT_LABEL}（在新标签页打开）" title="${PROJECT_LABEL}">
-	<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg>
-</a>`;
+function githubIcon(size: number): string {
+	return `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg>`;
+}
+
+export const PROJECT_TEXT_LINK = `<a class="link repo-link" href="${PROJECT_URL}" target="_blank" rel="noopener">${githubIcon(14)}GitHub</a>`;
+
+export const PROJECT_ICON_LINK = `<a class="link project-link" href="${PROJECT_URL}" target="_blank" rel="noopener" aria-label="${PROJECT_LABEL}（在新标签页打开）" title="${PROJECT_LABEL}">${githubIcon(18)}</a>`;
