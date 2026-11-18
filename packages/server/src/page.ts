@@ -22,6 +22,8 @@ export const PAGE_STYLE = `
 	body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 var(--font); -webkit-font-smoothing: antialiased; }
 	[hidden] { display: none !important; }
 	code { font-family: var(--mono); }
+	::selection { background: color-mix(in srgb, var(--text) 16%, transparent); }
+	:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 	.top { max-width: 880px; margin: 0 auto; padding: 28px 24px 0; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 	.brand { display: flex; gap: 10px; align-items: center; font-weight: 600; font-size: 16px; }
@@ -31,6 +33,8 @@ export const PAGE_STYLE = `
 	.user > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.link { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; font: inherit; white-space: nowrap; }
 	.link:hover { color: var(--text); }
+	.project-link { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-sm); }
+	.project-link:hover { background: var(--surface-2); }
 
 	.container { max-width: 880px; margin: 0 auto; padding: 8px 24px 80px; }
 	.block { margin-top: 40px; }
@@ -148,15 +152,23 @@ export const PAGE_STYLE = `
 	.waiting { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
 	.waiting.done { color: var(--ok); }
 
-	.center { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-	.auth { width: 100%; max-width: 420px; }
-	.auth .card { padding: 32px 28px; }
-	.auth .brand { margin-bottom: 24px; }
-	h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
-	.lead { margin: 0 0 22px; color: var(--muted); }
-	.context { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin-bottom: 20px; border-radius: var(--radius-sm);
-		background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; }
-	.foot { margin-top: 18px; text-align: center; color: var(--muted); font-size: 12px; }
+	/* 登录、授权这类单页：顶栏和账号页一致，表单不套卡片，单独一列放在页面中间 */
+	.auth-page { min-height: 100vh; min-height: 100svh; display: grid; grid-template-rows: auto 1fr; }
+	.auth-page > .top { width: 100%; }
+	.auth { width: 100%; max-width: 408px; margin: 0 auto; padding: 40px 24px 96px; align-self: center; }
+	.auth h1 { font-size: 26px; line-height: 1.3; }
+	.auth .lead { margin: 8px 0 32px; }
+	.auth .field + .field { margin-top: 20px; }
+	.auth .label { margin-bottom: 8px; font-size: 13px; color: var(--text); }
+	.auth .input { height: 44px; padding: 0 14px; }
+	.auth-submit { display: block; height: 44px; margin-top: 28px; }
+	.auth-hint { margin: 16px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
+	h1 { margin: 0; font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
+	.lead { margin: 6px 0 24px; color: var(--muted); }
+	.lead code { padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--text); font-size: .9em; }
+	.context { display: flex; gap: 8px; align-items: center; margin: -16px 0 32px; color: var(--muted); font-size: 13px; }
+	.context svg { flex: none; }
+
 	.perms { list-style: none; margin: 0 0 20px; padding: 0; display: grid; gap: 10px; }
 	.perms li { display: flex; gap: 10px; align-items: flex-start; }
 	.perms li::before { content: "✓"; flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
@@ -169,7 +181,7 @@ export const PAGE_STYLE = `
 	.pair { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 20px; }
 	.pair .icon, .pair .logo { width: 48px; height: 48px; font-size: 20px; border-radius: var(--radius); }
 	.pair .line { width: 40px; border-top: 2px dotted var(--border-strong); }
-	.facts { margin: 0 0 20px; padding: 0; list-style: none; font-size: 13px; color: var(--muted); display: grid; gap: 4px; text-align: center; }
+	.facts { margin: 8px 0 20px; padding: 0; list-style: none; font-size: 13px; color: var(--muted); display: grid; gap: 4px; text-align: center; }
 	.facts strong { color: var(--text); font-weight: 600; }
 	.buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 	.buttons form { display: contents; }
@@ -194,13 +206,12 @@ export const PAGE_STYLE = `
 	}
 
 	@media (max-width: 640px) {
-		.top, .container { padding-left: 16px; padding-right: 16px; }
+		.top, .container, .auth { padding-left: 16px; padding-right: 16px; }
 		.user .name { display: none; }
 		.block-head { flex-direction: column; align-items: stretch; }
 		.row { flex-wrap: wrap; padding: 14px 16px; }
 		.row-status { text-align: left; }
 		.copy { flex-direction: column; align-items: stretch; }
-		.auth .card { padding: 28px 20px; }
 	}
 `;
 
@@ -402,3 +413,10 @@ export function escapeHtml(value: string): string {
 }
 
 export const BRAND = `<div class="brand"><span class="logo">π</span>pi-bridge</div>`;
+
+const PROJECT_URL = "https://github.com/cr-zhichen/pi-bridge";
+const PROJECT_LABEL = "GitHub 仓库";
+
+export const PROJECT_ICON_LINK = `<a class="link project-link" href="${PROJECT_URL}" target="_blank" rel="noopener" aria-label="${PROJECT_LABEL}（在新标签页打开）" title="${PROJECT_LABEL}">
+	<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg>
+</a>`;

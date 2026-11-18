@@ -129,7 +129,9 @@ ${PAGE_HEAD}
 <title>授权 ${name} · pi-bridge</title>
 </head>
 <body>
-<div class="center"><div class="auth"><div class="card">
+<div class="auth-page">
+<header class="top">${BRAND}</header>
+<main class="auth">
 	<div class="pair"><span class="icon">${escapeHtml(initial(details.clientName))}</span><span class="line"></span><span class="logo">π</span></div>
 	<h1 style="text-align:center">${name} 想要使用你的电脑</h1>
 	<ul class="facts">
@@ -161,7 +163,8 @@ ${PAGE_HEAD}
 		<button class="btn primary wide" name="decision" value="approve">允许</button>
 	</form>
 	<p class="note" style="text-align:center">只在你自己添加连接器时允许。之后可以随时在账号页撤销。</p>
-</div></div></div>
+</main>
+</div>
 </body>
 </html>
 `;
@@ -176,11 +179,13 @@ ${PAGE_HEAD}
 <title>无法完成授权 · pi-bridge</title>
 </head>
 <body>
-<div class="center"><div class="auth"><div class="card">
-	${BRAND}
+<div class="auth-page">
+<header class="top">${BRAND}</header>
+<main class="auth">
 	<h1>无法完成授权</h1>
 	<p class="lead" style="margin:0">${escapeHtml(message)}</p>
-</div></div></div>
+</main>
+</div>
 </body>
 </html>
 `,
