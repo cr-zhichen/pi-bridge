@@ -1,4 +1,10 @@
-import { BRAND, PAGE_HEAD, PAGE_SCRIPT, PROJECT_ICON_LINK } from "./page.ts";
+import {
+	BRAND,
+	PAGE_HEAD,
+	PAGE_SCRIPT,
+	PROJECT_ICON_LINK,
+	PROJECT_TEXT_LINK,
+} from "./page.ts";
 
 export const ADMIN_PAGE = `<!doctype html>
 <html lang="zh-CN">
@@ -9,15 +15,16 @@ ${PAGE_HEAD}
 <body>
 
 <div id="view-login" class="auth-page">
-	<header class="top">${BRAND}<div class="user">${PROJECT_ICON_LINK}</div></header>
 	<main class="auth">
 		<form id="login-form">
+			${BRAND}
 			<h1>管理员登录</h1>
 			<p class="lead">使用部署时设置的 <code>ADMIN_KEY</code></p>
 			<div class="field"><label class="label" for="key">管理员密钥</label><input class="input" id="key" type="password" autocomplete="current-password" required autofocus></div>
 			<button class="btn primary wide auth-submit">登录</button>
 		</form>
 	</main>
+	<footer class="auth-foot">${PROJECT_TEXT_LINK}</footer>
 </div>
 
 <div id="view-app" hidden>

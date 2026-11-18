@@ -1,4 +1,10 @@
-import { BRAND, PAGE_HEAD, PAGE_SCRIPT, PROJECT_ICON_LINK } from "./page.ts";
+import {
+	BRAND,
+	PAGE_HEAD,
+	PAGE_SCRIPT,
+	PROJECT_ICON_LINK,
+	PROJECT_TEXT_LINK,
+} from "./page.ts";
 
 const PASSWORD_FIELDS = `
 				<div class="field"><span class="label">当前密码</span><input class="input" name="current" type="password" autocomplete="current-password" required></div>
@@ -15,9 +21,9 @@ ${PAGE_HEAD}
 <body>
 
 <div id="view-login" class="auth-page" hidden>
-	<header class="top">${BRAND}<div class="user">${PROJECT_ICON_LINK}</div></header>
 	<main class="auth">
 		<form id="login-form">
+			${BRAND}
 			<h1>登录</h1>
 			<p class="lead">使用管理员为你创建的账号</p>
 			<div id="login-context" class="context" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>登录后继续授权连接器</span></div>
@@ -27,17 +33,19 @@ ${PAGE_HEAD}
 			<p class="auth-hint">忘记密码请联系管理员重置</p>
 		</form>
 	</main>
+	<footer class="auth-foot">${PROJECT_TEXT_LINK}</footer>
 </div>
 
 <div id="view-first" class="auth-page" hidden>
-	<header class="top">${BRAND}<div class="user"><button class="link logout">退出登录</button></div></header>
 	<main class="auth">
 		<form id="first-form" class="password-form">
+			${BRAND}
 			<h1>设置新密码</h1>
 			<p class="lead">当前是管理员生成的初始密码，修改后才能继续使用。</p>${PASSWORD_FIELDS}
 			<button class="btn primary wide auth-submit">保存并继续</button>
 		</form>
 	</main>
+	<footer class="auth-foot"><button class="link logout">退出登录</button></footer>
 </div>
 
 <div id="view-account" hidden>
