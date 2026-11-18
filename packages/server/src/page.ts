@@ -6,7 +6,7 @@ export const PAGE_STYLE = `
 		--bg: #fafafa; --surface: #ffffff; --surface-2: #f4f4f5; --border: #e4e4e7; --border-strong: #d4d4d8;
 		--text: #18181b; --muted: #71717a; --accent: #18181b; --accent-text: #ffffff; --accent-soft: #f4f4f5;
 		--danger: #dc2626; --ok: #16a34a; --ok-soft: #dcfce7; --warn: #d97706; --warn-soft: #fffbeb; --warn-text: #92400e; --warn-border: #fde68a;
-		--radius: 10px; --radius-sm: 7px; --shadow: 0 1px 2px rgb(0 0 0 / .04); --overlay: rgb(0 0 0 / .4);
+		--radius: 10px; --radius-sm: 7px; --shadow: 0 1px 2px rgb(0 0 0 / .04);
 		--font: -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Segoe UI", system-ui, sans-serif;
 		--mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 	}
@@ -15,7 +15,7 @@ export const PAGE_STYLE = `
 			--bg: #09090b; --surface: #111113; --surface-2: #19191c; --border: #27272a; --border-strong: #3f3f46;
 			--text: #fafafa; --muted: #a1a1aa; --accent: #fafafa; --accent-text: #18181b; --accent-soft: #27272a;
 			--danger: #f87171; --ok: #4ade80; --ok-soft: rgb(74 222 128 / .15); --warn: #f59e0b; --warn-soft: rgb(245 158 11 / .08);
-			--warn-text: #fbbf24; --warn-border: rgb(245 158 11 / .3); --shadow: none; --overlay: rgb(0 0 0 / .6);
+			--warn-text: #fbbf24; --warn-border: rgb(245 158 11 / .3); --shadow: none;
 		}
 	}
 	* { box-sizing: border-box; }
@@ -57,6 +57,8 @@ export const PAGE_STYLE = `
 	.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 	.btn.primary:hover { opacity: .88; }
 	.btn.danger { color: var(--danger); }
+	.btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+	.btn.danger-solid:hover { opacity: .88; }
 	.btn.small { padding: 5px 10px; font-size: 12px; }
 	.btn.wide { width: 100%; padding: 10px 14px; font-size: 14px; }
 	.btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -119,15 +121,27 @@ export const PAGE_STYLE = `
 	details.advanced summary::after { content: "展开"; }
 	details.advanced[open] summary::after { content: "收起"; }
 	.advanced-body { padding: 0 16px 16px; display: grid; gap: 14px; }
-	.risk { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-2); border-left: 3px solid var(--danger); font-size: 13px; }
+	.risk { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px;
+		background: color-mix(in srgb, var(--danger) 6%, var(--surface)); border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--border)); }
 	.risk strong { color: var(--danger); }
 	.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); cursor: pointer; }
 	.check input { margin-top: 3px; accent-color: var(--accent); }
 
-	.overlay { position: fixed; inset: 0; background: var(--overlay); display: grid; place-items: center; padding: 16px; z-index: 40; }
-	.modal { width: 100%; max-width: 540px; max-height: calc(100vh - 32px); overflow: auto; background: var(--surface); border: 1px solid var(--border);
-		border-radius: var(--radius); box-shadow: 0 24px 64px rgb(0 0 0 / .2); padding: 24px; }
-	.modal.narrow { max-width: 420px; }
+	dialog.modal { width: min(540px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; overflow: auto; color: var(--text);
+		background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 24px 64px rgb(0 0 0 / .2); }
+	dialog.modal.narrow { width: min(420px, calc(100vw - 32px)); }
+	/* 旧版浏览器的 ::backdrop 不继承自定义属性，这里直接写颜色 */
+	dialog.modal::backdrop { background: rgb(0 0 0 / .4); }
+	@media (prefers-color-scheme: dark) { dialog.modal::backdrop { background: rgb(0 0 0 / .6); } }
+	dialog.modal[open] { animation: dialog-in .16s ease-out; }
+	dialog.modal[open]::backdrop { animation: fade-in .16s ease-out; }
+	@keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+	@keyframes fade-in { from { opacity: 0; } }
+	.modal-body { padding: 24px; }
+	.dialog-text { margin: 8px 0 0; color: var(--muted); }
+	.dialog-field { margin-top: 18px; }
+	.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+	.field-error { margin: 6px 0 0; color: var(--danger); font-size: 12px; }
 	.modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
 	.modal-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px; padding-top: 16px;
 		border-top: 1px solid var(--border); }
@@ -162,9 +176,22 @@ export const PAGE_STYLE = `
 	.warn-box { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn-text);
 		border: 1px solid var(--warn-border); font-size: 13px; margin-bottom: 20px; }
 
-	.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 10px 16px; z-index: 60;
-		border-radius: var(--radius-sm); background: var(--text); color: var(--bg); box-shadow: 0 8px 24px rgb(0 0 0 / .2); font-size: 13px; }
+	/* 提示放在 popover 里，和弹窗一样处在顶层，弹窗打开时也看得见 */
+	.toasts { position: fixed; inset: auto 0 24px; margin: 0 auto; width: max-content; max-width: calc(100vw - 32px); padding: 0;
+		border: 0; background: transparent; overflow: visible; pointer-events: none; }
+	.toasts:popover-open, .toasts:not([popover]) { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+	.toast { display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 10px; border-radius: var(--radius-sm); font-size: 13px;
+		background: var(--text); color: var(--bg); box-shadow: 0 8px 24px rgb(0 0 0 / .2); animation: toast-in .18s ease-out;
+		transition: opacity .2s, transform .2s; pointer-events: auto; }
+	.toast.leaving { opacity: 0; transform: translateY(4px); }
+	.toast-icon { width: 18px; height: 18px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700;
+		background: var(--ok); color: #fff; }
 	.toast.error { background: var(--danger); color: #fff; }
+	.toast.error .toast-icon { background: #fff; color: var(--danger); }
+	@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
+	@media (prefers-reduced-motion: reduce) {
+		dialog.modal[open], dialog.modal[open]::backdrop, .toast { animation: none; }
+	}
 
 	@media (max-width: 640px) {
 		.top, .container { padding-left: 16px; padding-right: 16px; }
@@ -180,7 +207,6 @@ export const PAGE_STYLE = `
 /** 页面自己定义 load()，act() 在操作完成后调用它刷新。 */
 export const PAGE_SCRIPT = `
 const $ = (id) => document.getElementById(id);
-let toastTimer;
 
 function el(tag, props = {}, ...children) {
 	const node = Object.assign(document.createElement(tag), props);
@@ -188,13 +214,24 @@ function el(tag, props = {}, ...children) {
 	return node;
 }
 
+/** 页面底部的提示，可以叠放多条。重新显示 popover 把它提到所有弹窗之上。 */
 function toast(message, isError) {
-	const node = $("toast");
-	node.textContent = message;
-	node.className = "toast" + (isError ? " error" : "");
-	node.hidden = false;
-	clearTimeout(toastTimer);
-	toastTimer = setTimeout(() => { node.hidden = true; }, 2500);
+	const box = $("toasts");
+	const item = el("div", { className: "toast" + (isError ? " error" : ""), role: isError ? "alert" : "status" },
+		el("span", { className: "toast-icon", textContent: isError ? "!" : "✓" }),
+		el("span", { textContent: message }));
+	box.append(item);
+	if (box.showPopover) {
+		if (box.matches(":popover-open")) box.hidePopover();
+		box.showPopover();
+	}
+	setTimeout(() => {
+		item.classList.add("leaving");
+		setTimeout(() => {
+			item.remove();
+			if (!box.children.length && box.hidePopover && box.matches(":popover-open")) box.hidePopover();
+		}, 200);
+	}, isError ? 4500 : 2500);
 }
 
 function copyButton(text, className = "btn") {
@@ -239,26 +276,93 @@ function platformName(platform) {
 	return PLATFORMS[platform] ?? platform;
 }
 
+// 弹窗用原生 <dialog>：顶层显示、焦点锁定和 Esc 关闭都由浏览器处理。
 function openModal(id) {
-	$(id).hidden = false;
+	$(id).showModal();
 	const input = $(id).querySelector("input:not([type=hidden]):not([type=checkbox])");
-	if (input) setTimeout(() => input.focus(), 0);
+	if (input) input.focus();
 }
 
 function closeModal(id) {
-	$(id).hidden = true;
-	$(id).dispatchEvent(new Event("close"));
+	$(id).close();
 }
 
+let pressedOn = null;
+document.addEventListener("pointerdown", (event) => { pressedOn = event.target; });
 document.addEventListener("click", (event) => {
 	const close = event.target.closest("[data-close]");
-	if (close) closeModal(close.closest(".overlay").id);
-	else if (event.target.classList?.contains("overlay")) closeModal(event.target.id);
+	if (close) close.closest("dialog")?.close();
+	// 点在弹窗外的遮罩上：事件目标是 dialog 本身（内容都在 .modal-body 里）。
+	// 要求按下时也在遮罩上，避免在输入框里拖选文字时松开鼠标关掉弹窗
+	else if (event.target instanceof HTMLDialogElement && pressedOn === event.target) event.target.close();
 });
-document.addEventListener("keydown", (event) => {
-	if (event.key !== "Escape") return;
-	for (const overlay of document.querySelectorAll(".overlay:not([hidden])")) closeModal(overlay.id);
-});
+
+function dialogText(message) {
+	return typeof message === "string" ? el("p", { className: "dialog-text", textContent: message }) : message;
+}
+
+/** 确认框，返回是否确认。danger 时确认按钮为红色，默认焦点放在取消上。 */
+function confirmDialog({ title, message, confirmText = "确定", cancelText = "取消", danger = false }) {
+	return new Promise((resolve) => {
+		let confirmed = false;
+		const ok = el("button", { type: "button", className: "btn " + (danger ? "danger-solid" : "primary"), textContent: confirmText });
+		const cancel = el("button", { type: "button", className: "btn", textContent: cancelText });
+		const dialog = el("dialog", { className: "modal narrow" },
+			el("div", { className: "modal-body" },
+				el("h3", { textContent: title }),
+				message && dialogText(message),
+				el("div", { className: "dialog-actions" }, cancel, ok)));
+		ok.onclick = () => { confirmed = true; dialog.close(); };
+		cancel.onclick = () => dialog.close();
+		dialog.addEventListener("close", () => { dialog.remove(); resolve(confirmed); });
+		document.body.append(dialog);
+		dialog.showModal();
+		(danger ? cancel : ok).focus();
+	});
+}
+
+/**
+ * 输入框，返回 submit 的结果，取消时返回 null。
+ * submit 抛出的错误显示在输入框下方，弹窗保持打开。
+ */
+function promptDialog({ title, message, label, placeholder = "", note, confirmText = "确定", submit = (value) => value }) {
+	return new Promise((resolve) => {
+		let result = null;
+		const input = el("input", { className: "input", placeholder, required: true, autocomplete: "off", spellcheck: false });
+		input.setAttribute("autocapitalize", "none");
+		const error = el("p", { className: "field-error", hidden: true });
+		const ok = el("button", { type: "submit", className: "btn primary", textContent: confirmText });
+		const cancel = el("button", { type: "button", className: "btn", textContent: "取消" });
+		const form = el("form", { className: "modal-body" },
+			el("h3", { textContent: title }),
+			message && dialogText(message),
+			el("div", { className: "dialog-field" },
+				el("span", { className: "label", textContent: label }), input,
+				note && el("p", { className: "note", textContent: note }), error),
+			el("div", { className: "dialog-actions" }, cancel, ok));
+		const dialog = el("dialog", { className: "modal narrow" }, form);
+		form.onsubmit = async (event) => {
+			event.preventDefault();
+			ok.disabled = true;
+			error.hidden = true;
+			try {
+				result = await submit(input.value.trim());
+				dialog.close();
+			} catch (err) {
+				error.textContent = err.message;
+				error.hidden = false;
+				input.focus();
+			} finally {
+				ok.disabled = false;
+			}
+		};
+		cancel.onclick = () => dialog.close();
+		dialog.addEventListener("close", () => { dialog.remove(); resolve(result); });
+		document.body.append(dialog);
+		dialog.showModal();
+		input.focus();
+	});
+}
 
 async function act(button, fn) {
 	button.disabled = true;

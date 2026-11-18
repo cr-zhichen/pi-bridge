@@ -120,11 +120,11 @@ ${PAGE_HEAD}
 	</main>
 </div>
 
-<div class="overlay" id="modal-add" hidden>
-	<div class="modal" role="dialog" aria-labelledby="add-title">
+<dialog class="modal" id="modal-add" aria-labelledby="add-title">
+	<div class="modal-body">
 		<div class="modal-head">
 			<div><h3 id="add-title">添加电脑</h3><p class="sub">为这台电脑生成专用的登录命令。需要先安装 Pi 和 Node.js 22.19 以上。</p></div>
-			<button class="link" data-close>关闭</button>
+			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<form id="add-form">
 			<span class="label">电脑名称</span>
@@ -137,31 +137,31 @@ ${PAGE_HEAD}
 			<p class="note">命令里的密钥只显示这一次。关闭后如果还没登录，在列表里取消这台电脑再重新添加即可。</p>
 			<div class="modal-foot">
 				<span class="waiting" id="add-waiting"><span class="dot wait"></span><span>等待这台电脑连接…</span></span>
-				<button class="btn" id="add-done" data-close>完成</button>
+				<button type="button" class="btn" id="add-done" data-close>完成</button>
 			</div>
 		</div>
 	</div>
-</div>
+</dialog>
 
-<div class="overlay" id="modal-password" hidden>
-	<form class="modal narrow password-form" id="password-form">
-		<div class="modal-head"><h3>修改密码</h3><button type="button" class="link" data-close>关闭</button></div>${PASSWORD_FIELDS}
+<dialog class="modal narrow" id="modal-password" aria-labelledby="password-title">
+	<form class="modal-body password-form" id="password-form">
+		<div class="modal-head"><h3 id="password-title">修改密码</h3><button type="button" class="link" data-close>关闭</button></div>${PASSWORD_FIELDS}
 		<div class="modal-foot"><span class="sub" style="margin:0">其他设备上的登录会失效</span><button class="btn primary">保存</button></div>
 	</form>
-</div>
+</dialog>
 
-<div class="overlay" id="modal-secret" hidden>
-	<div class="modal">
+<dialog class="modal" id="modal-secret" aria-labelledby="secret-title">
+	<div class="modal-body">
 		<div class="modal-head">
 			<div><h3 id="secret-title"></h3><p class="sub">地址里的密钥只显示这一次，请立即复制。</p></div>
-			<button class="link" data-close>关闭</button>
+			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<div id="secret-body"></div>
 		<p class="note">添加到客户端时，身份验证选择「无需登录」或「无」。</p>
 	</div>
-</div>
+</dialog>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toasts" class="toasts" popover="manual"></div>
 
 <script>
 ${PAGE_SCRIPT}
@@ -229,7 +229,11 @@ function renderApps() {
 		meta: (app.clientDomain ? "来自 " + app.clientDomain : "返回地址 " + app.redirectHost + " · 名称未经验证") + " · " + formatDate(app.createdAt) + "授权",
 		status: app.lastUsedAt ? ago(app.lastUsedAt) + "使用" : "尚未使用",
 		actions: [button("撤销", "", async () => {
-			if (!confirm("撤销「" + app.clientName + "」的授权？它将无法再使用你的电脑，要继续使用需要重新连接并授权。")) return;
+			if (!await confirmDialog({
+				title: "撤销「" + app.clientName + "」的授权？",
+				message: "它将无法再使用你的电脑。要继续使用，需要在客户端里重新连接并授权。",
+				confirmText: "撤销", danger: true,
+			})) return;
 			await api("me/apps/" + encodeURIComponent(app.id) + "/revoke", {});
 			toast("已撤销");
 		})],
@@ -246,7 +250,11 @@ function renderUrlKeys() {
 		meta: "密钥 …" + key.hint + " · " + formatDate(key.createdAt) + "创建",
 		status: key.lastUsedAt ? ago(key.lastUsedAt) + "使用" : "尚未使用",
 		actions: [button("吊销", "danger", async () => {
-			if (!confirm("吊销「" + key.name + "」？使用这个地址的客户端将无法再调用。")) return;
+			if (!await confirmDialog({
+				title: "吊销「" + key.name + "」？",
+				message: "使用这个地址的客户端将无法再调用。",
+				confirmText: "吊销", danger: true,
+			})) return;
 			await api("me/keys/" + key.id + "/revoke", {});
 			toast("已吊销");
 		})],
@@ -261,11 +269,11 @@ function removeWarning(device, key) {
 		? me.devices.filter((d) => d.id !== device.id && d.keyId === device.keyId).map((d) => d.name)
 		: [];
 	const also = others.length ? "，" + others.join("、") + " 也会断开" : "";
-	if (!key) return "从列表中移除「" + device.name + "」？";
+	if (!key) return "它的密钥已经吊销，只从列表中移除。";
 	if (isLegacy(key)) {
-		return "移除「" + device.name + "」？它用的是迁移的旧密钥，移除会同时吊销旧密钥" + also + "，使用旧密钥的连接器地址也会失效。";
+		return "它用的是迁移的旧密钥，移除会同时吊销旧密钥" + also + "，使用旧密钥的连接器地址也会失效。";
 	}
-	return "移除「" + device.name + "」？这台电脑会立即断开，它的密钥同时作废" + also + "。以后要再用，重新添加即可。";
+	return "这台电脑会立即断开，它的密钥同时作废" + also + "。以后要再用，重新添加即可。";
 }
 
 function renderDevices() {
@@ -284,7 +292,11 @@ function renderDevices() {
 			status: device.online ? "在线" : ago(device.lastSeen) + "在线",
 			statusOn: device.online,
 			actions: [button("移除", "", async () => {
-				if (!confirm(removeWarning(device, key))) return;
+				if (!await confirmDialog({
+					title: "移除「" + device.name + "」？",
+					message: removeWarning(device, key),
+					confirmText: "移除", danger: true,
+				})) return;
 				await api("me/devices/" + device.id + "/remove", {});
 				toast("已移除");
 			})],
@@ -298,7 +310,11 @@ function renderDevices() {
 			badges: [badge("等待首次连接")],
 			meta: formatTime(key.createdAt) + " 生成登录命令 · 密钥 …" + key.hint,
 			actions: [button("取消", "", async () => {
-				if (!confirm("取消添加「" + key.name + "」？之前生成的登录命令会作废。")) return;
+				if (!await confirmDialog({
+					title: "取消添加「" + key.name + "」？",
+					message: "之前生成的登录命令会作废。",
+					confirmText: "取消添加", cancelText: "保留", danger: true,
+				})) return;
 				await api("me/keys/" + key.id + "/revoke", {});
 			})],
 		}));
@@ -391,7 +407,11 @@ $("hide-legacy").onclick = () => {
 $("revoke-legacy").onclick = (event) => act(event.currentTarget, async () => {
 	const legacy = me.keys.filter(isLegacy);
 	const names = me.devices.filter((d) => legacy.some((key) => key.id === d.keyId)).map((d) => d.name);
-	if (!confirm("吊销旧密钥？" + (names.length ? names.join("、") + " 会断开，需要重新添加；" : "") + "使用旧密钥的连接器地址也会失效。")) return;
+	if (!await confirmDialog({
+		title: "吊销旧密钥？",
+		message: (names.length ? names.join("、") + " 会断开，需要重新添加。" : "") + "使用旧密钥的连接器地址也会失效。",
+		confirmText: "吊销", danger: true,
+	})) return;
 	for (const key of legacy) await api("me/keys/" + key.id + "/revoke", {});
 	toast("已吊销旧密钥");
 });

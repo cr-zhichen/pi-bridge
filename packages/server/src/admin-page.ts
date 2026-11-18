@@ -47,18 +47,18 @@ ${PAGE_HEAD}
 	</main>
 </div>
 
-<div class="overlay" id="modal-secret" hidden>
-	<div class="modal">
+<dialog class="modal" id="modal-secret" aria-labelledby="secret-title">
+	<div class="modal-body">
 		<div class="modal-head">
 			<div><h3 id="secret-title"></h3><p class="sub">密码只显示这一次，请立即发给使用者。首次登录后需要修改密码。</p></div>
-			<button class="link" data-close>关闭</button>
+			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<div id="secret-body"></div>
-		<div class="modal-foot"><span></span><button class="btn" id="copy-all">复制全部</button></div>
+		<div class="modal-foot"><span></span><button type="button" class="btn" id="copy-all">复制全部</button></div>
 	</div>
-</div>
+</dialog>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toasts" class="toasts" popover="manual"></div>
 
 <script>
 ${PAGE_SCRIPT}
@@ -123,25 +123,44 @@ function devicesText(devices) {
 function userRow(user) {
 	const online = user.devices.some((d) => d.online);
 	const toggle = button(user.disabled ? "启用" : "禁用", "", async () => {
-		if (!user.disabled && !confirm("禁用 " + user.name + "？这位用户的电脑会断开，网页版无法再调用，账号页会退出登录。启用后恢复。")) return;
+		if (!user.disabled && !await confirmDialog({
+			title: "禁用 " + user.name + "？",
+			message: "这位用户的电脑会断开，网页版无法再调用，账号页会退出登录。启用后恢复。",
+			confirmText: "禁用", danger: true,
+		})) return;
 		await api("users/" + user.id + "/" + (user.disabled ? "enable" : "disable"), {});
 		toast(user.disabled ? "已启用" : "已禁用");
 	});
 	const account = button(user.username ? "重置密码" : "设置登录账号", "", async () => {
 		if (user.username) {
-			if (!confirm("重置 " + user.name + " 的密码？旧密码立即失效，账号页会退出登录。电脑和网页版不受影响。")) return;
+			if (!await confirmDialog({
+				title: "重置 " + user.name + " 的密码？",
+				message: "旧密码立即失效，账号页会退出登录。电脑和网页版不受影响。",
+				confirmText: "重置密码", danger: true,
+			})) return;
 			const { password } = await api("users/" + user.id + "/reset-password", {});
 			showPassword(user.name + " 的新密码", user.username, password);
 			return;
 		}
-		const username = prompt("为 " + user.name + " 设置登录用的用户名（字母、数字和 _ . -）");
-		if (!username) return;
-		const result = await api("users/" + user.id + "/account", { username });
+		const result = await promptDialog({
+			title: "为 " + user.name + " 设置登录账号",
+			message: "设置后会生成初始密码。这位用户原来的电脑和连接器不受影响。",
+			label: "用户名",
+			placeholder: "例如 zhangsan",
+			note: "2 到 32 位，只能包含字母、数字和 _ . -",
+			confirmText: "生成账号",
+			submit: (username) => api("users/" + user.id + "/account", { username }),
+		});
+		if (!result) return;
 		showPassword(user.name + " 的登录账号", result.username, result.password);
 	});
 	const hasAccess = user.keyCount + user.appCount > 0;
 	const revoke = button("吊销全部访问", "danger", async () => {
-		if (!confirm("吊销 " + user.name + " 的全部密钥和应用授权？所有电脑会立即断开，网页版连接器也会失效。用户需要登录账号页重新添加。")) return;
+		if (!await confirmDialog({
+			title: "吊销 " + user.name + " 的全部访问？",
+			message: "全部 " + user.keyCount + " 个密钥和 " + user.appCount + " 个应用授权都会失效：所有电脑立即断开，网页版连接器也无法再调用。用户需要登录账号页重新添加。",
+			confirmText: "吊销全部访问", danger: true,
+		})) return;
 		await api("users/" + user.id + "/revoke-access", {});
 		toast("已吊销");
 	});
