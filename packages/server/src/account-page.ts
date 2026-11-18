@@ -463,10 +463,11 @@ $("add-form").onsubmit = async (event) => {
 		const commands = [
 			["安装（已安装可跳过）", "npm install -g @zgccrui/pi-bridge"],
 			["登录", "pi-bridge login " + location.origin + " " + token + " --name " + shellQuote(name)],
-			["开机后自动运行", "pi-bridge service install"],
+			["启动", "pi-bridge start",
+				el("p", { className: "note" }, "需要开机后自动运行时，改用 ", el("code", { textContent: "pi-bridge service install" }))],
 		];
-		$("add-steps").replaceChildren(...commands.map(([label, command]) =>
-			el("li", {}, el("div", {}, el("span", { className: "label", textContent: label }), copyRow(command, true)))));
+		$("add-steps").replaceChildren(...commands.map(([label, command, note]) =>
+			el("li", {}, el("div", {}, el("span", { className: "label", textContent: label }), copyRow(command, true), note))));
 		setWaiting(null);
 		$("add-form").hidden = true;
 		$("add-commands").hidden = false;
