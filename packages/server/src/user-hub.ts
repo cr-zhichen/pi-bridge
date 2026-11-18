@@ -31,7 +31,12 @@ type DeviceRow = {
 	platform: string;
 	version: string;
 	last_seen: number;
+	key_id: string | null;
 };
+
+function keyTag(keyId: string): string {
+	return `key:${keyId}`;
+}
 
 /**
  * 每个用户一个实例：保持该用户各设备的 WebSocket 连接，
@@ -50,13 +55,20 @@ export class UserHub extends DurableObject<Env> {
 			version TEXT NOT NULL,
 			last_seen INTEGER NOT NULL
 		)`);
+		// 设备最近一次连接用的密钥，账号页据此显示每台电脑用的是哪个密钥
+		const columns = this.sql
+			.exec<{ name: string }>("PRAGMA table_info(devices)")
+			.toArray();
+		if (!columns.some((column) => column.name === "key_id")) {
+			this.sql.exec("ALTER TABLE devices ADD COLUMN key_id TEXT");
+		}
 		// CLI 的心跳由运行时直接回复，不唤醒休眠的实例
 		this.ctx.setWebSocketAutoResponse(
 			new WebSocketRequestResponsePair("ping", "pong"),
 		);
 	}
 
-	/** CLI 的 WebSocket 连接。 */
+	/** CLI 的 WebSocket 连接。查询参数 key 是 Worker 鉴权后填入的密钥 ID。 */
 	async fetch(request: Request): Promise<Response> {
 		if (request.headers.get("Upgrade") !== "websocket") {
 			return new Response("需要 WebSocket 连接", { status: 426 });
@@ -76,17 +88,20 @@ export class UserHub extends DurableObject<Env> {
 		for (const old of this.ctx.getWebSockets(id)) {
 			old.close(CLOSE_REPLACED, "replaced");
 		}
+		const keyId = query.get("key") ?? "";
 		const { 0: client, 1: server } = new WebSocketPair();
-		this.ctx.acceptWebSocket(server, [id]);
+		// 第一个标签是设备 ID；第二个标签用来在吊销密钥时只断开用它连接的电脑
+		this.ctx.acceptWebSocket(server, [id, keyTag(keyId)]);
 		this.sql.exec(
-			`INSERT INTO devices (id, name, platform, version, last_seen) VALUES (?, ?, ?, ?, ?)
+			`INSERT INTO devices (id, name, platform, version, last_seen, key_id) VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET name = excluded.name, platform = excluded.platform,
-				version = excluded.version, last_seen = excluded.last_seen`,
+				version = excluded.version, last_seen = excluded.last_seen, key_id = excluded.key_id`,
 			id,
 			(query.get("name") || id).slice(0, 64),
 			(query.get("platform") ?? "").slice(0, 32),
 			(query.get("version") ?? "").slice(0, 32),
 			Date.now(),
+			keyId,
 		);
 		return new Response(null, { status: 101, webSocket: client });
 	}
@@ -129,6 +144,7 @@ export class UserHub extends DurableObject<Env> {
 				version: row.version,
 				online: this.socketOf(row.id) !== undefined,
 				lastSeen: row.last_seen,
+				keyId: row.key_id ?? undefined,
 			}));
 	}
 
@@ -189,11 +205,30 @@ export class UserHub extends DurableObject<Env> {
 		return this.request(deviceId, op, params);
 	}
 
-	/** 密钥重置或用户被禁用时断开所有设备。 */
+	/** 用户被禁用或所有密钥被吊销时断开所有设备。 */
 	revoke(): void {
 		for (const ws of this.ctx.getWebSockets()) {
 			ws.close(CLOSE_REVOKED, "revoked");
 		}
+	}
+
+	/** 密钥被吊销时只断开用它连接的设备。 */
+	revokeKey(keyId: string): void {
+		for (const ws of this.ctx.getWebSockets(keyTag(keyId))) {
+			ws.close(CLOSE_REVOKED, "revoked");
+		}
+	}
+
+	/** 从设备列表中移除，仍连接着的话先断开。密钥由调用方吊销。 */
+	removeDevice(deviceId: string): boolean {
+		for (const ws of this.ctx.getWebSockets(deviceId)) {
+			ws.close(CLOSE_REVOKED, "removed");
+		}
+		const { rowsWritten } = this.sql.exec(
+			"DELETE FROM devices WHERE id = ?",
+			deviceId,
+		);
+		return rowsWritten > 0;
 	}
 
 	private request(

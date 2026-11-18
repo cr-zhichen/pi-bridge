@@ -3,6 +3,8 @@
 	"name": "pi-bridge",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-11-17",
+	// OAuth 连接器拉取客户端元数据文档（CIMD）时只访问公网地址，防止 SSRF
+	"compatibility_flags": ["global_fetch_strictly_public"],
 	"observability": {
 		"enabled": true,
 		"logs": {
@@ -16,5 +18,9 @@
 			{ "name": "USER_HUB", "class_name": "UserHub" }
 		]
 	},
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Registry", "UserHub"] }]
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["Registry", "UserHub"] }
+	],
+	// OAuth 的客户端、授权和令牌。不写 id，部署时由 Cloudflare 自动创建
+	"kv_namespaces": [{ "binding": "OAUTH_KV" }]
 }

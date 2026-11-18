@@ -64,6 +64,12 @@ export function checkDeviceName(
 	return trimmed;
 }
 
-export function mcpUrl(config: Config): string {
-	return `${config.server}/${config.token}/mcp`;
+/** 用户的账号页，在这里添加电脑、管理网页版的授权。 */
+export function accountUrl(server: string): string {
+	return `${server}/account`;
+}
+
+/** 网页版连接器使用 OAuth，地址里不含密钥。 */
+export function connectorHint(config: Pick<Config, "server">): string {
+	return `网页版连接器地址（添加时使用 OAuth 登录）：\n${config.server}/mcp`;
 }

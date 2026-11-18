@@ -13,6 +13,7 @@
 		"typecheck": "tsc -p ."
 	},
 	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "1.2.4",
 		"@modelcontextprotocol/server": "^2.4.0",
 		"zod": "^4.6.7"
 	},

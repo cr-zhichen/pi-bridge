@@ -4,11 +4,12 @@ import { parseArgs } from "node:util";
 import pkg from "../package.json" with { type: "json" };
 import { Bridge, log } from "./bridge.ts";
 import {
+	accountUrl,
 	type Config,
 	checkDeviceName,
+	connectorHint,
 	defaultDeviceName,
 	loadConfig,
-	mcpUrl,
 	newDeviceId,
 	saveConfig,
 } from "./config.ts";
@@ -103,7 +104,12 @@ async function login([server, token]: string[]): Promise<void> {
 		throw new Error(`无法连接到 ${normalized}，请检查服务地址和网络`);
 	}
 	if (devices === 401) {
-		throw new Error("密钥无效或用户已被禁用");
+		throw new Error("密钥无效、已被吊销或用户已被禁用");
+	}
+	if (devices === 403) {
+		throw new Error(
+			`这个密钥不能用来连接电脑。请在 ${accountUrl(normalized)} 添加电脑，用生成的命令登录`,
+		);
 	}
 	if (!Array.isArray(devices)) {
 		throw new Error("服务地址不正确或服务暂时不可用，请检查服务地址后重试");
@@ -131,7 +137,7 @@ async function login([server, token]: string[]): Promise<void> {
 			"运行 pi-bridge start 开始使用，或运行 pi-bridge service install 开机后自动在后台运行",
 		);
 	}
-	console.log(`\n网页版连接器地址：\n${mcpUrl(config)}`);
+	console.log(`\n${connectorHint(config)}`);
 }
 
 /** 在终端中询问电脑名称，直接回车使用默认名称；不在终端中运行时直接使用默认名称。 */
@@ -257,8 +263,7 @@ Pi：${piProblem(pi) ?? pi?.version}
 连接状态：${connection}
 开机自动运行：${serviceInstalled() ? "已开启" : "未开启"}
 
-网页版连接器地址：
-${mcpUrl(config)}`);
+${connectorHint(config)}`);
 }
 
 function requireConfig(): Config {
@@ -277,7 +282,10 @@ function connectionText(
 		return "无法连接到服务";
 	}
 	if (devices === 401) {
-		return "密钥无效或用户已被禁用";
+		return "密钥无效、已被吊销或用户已被禁用";
+	}
+	if (devices === 403) {
+		return "这个密钥不能用来连接电脑，请在账号页添加电脑后重新登录";
 	}
 	if (!Array.isArray(devices)) {
 		return "服务暂时不可用";

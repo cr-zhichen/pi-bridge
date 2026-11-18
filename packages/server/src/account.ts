@@ -1,0 +1,251 @@
+import { ACCOUNT_PAGE } from "./account-page.ts";
+import { handleAuthorize } from "./authorize.ts";
+import { jsonError, notFound, readJson } from "./http.ts";
+import { listApps, oauthOf } from "./oauth.ts";
+import { htmlResponse } from "./page.ts";
+import {
+	hashPassword,
+	MAX_PASSWORD_LENGTH,
+	passwordProblem,
+	verifyDummy,
+	verifyPassword,
+} from "./password.ts";
+import { normalizeUsername, type Scope, SESSION_TTL_MS } from "./registry.ts";
+import {
+	currentSession,
+	isSameOrigin,
+	type RegistryStub,
+	redirect,
+	type Session,
+	safeNext,
+	sessionCookie,
+} from "./session.ts";
+import { hubOf, registryOf } from "./stubs.ts";
+
+/** 这些路径由 handleAccount 处理。 */
+export const ACCOUNT_ROUTES = new Set([
+	"login",
+	"logout",
+	"account",
+	"authorize",
+	"api",
+]);
+
+/**
+ * 用户的账号页，使用管理员分配的用户名和密码登录：
+ * - GET  /login                       登录页，登录后跳到 ?next= 指定的站内地址，默认 /account
+ * - POST /logout                      表单退出（授权页的「切换账号」），然后回到登录页
+ * - GET  /account                     账号页
+ * - GET|POST /authorize               OAuth 授权确认（authorize.ts）
+ * - POST /api/login                   { username, password }
+ * - POST /api/logout
+ * - GET  /api/me                      当前用户、电脑、密钥和已授权的应用
+ * - POST /api/me/password             { current, next }
+ * - POST /api/me/keys                 { name, type: "device" | "connector" }，返回只显示一次的密钥
+ * - POST /api/me/keys/<id>/revoke
+ * - POST /api/me/devices/<id>/remove  移除电脑并吊销它使用的密钥
+ * - POST /api/me/apps/<id>/revoke     撤销 OAuth 授权
+ *
+ * 登录状态保存在 HttpOnly Cookie 中。写操作只接受同源的 JSON 请求，防止跨站请求。
+ */
+export async function handleAccount(
+	request: Request,
+	env: Env,
+	parts: string[],
+): Promise<Response> {
+	const registry = registryOf(env);
+	const [first, ...rest] = parts;
+
+	if (first === "authorize" && parts.length === 1) {
+		return handleAuthorize(request, env);
+	}
+	if (request.method === "GET" && parts.length === 1) {
+		if (first === "login") {
+			return htmlResponse(ACCOUNT_PAGE);
+		}
+		if (first === "account") {
+			return (await currentSession(request, registry))
+				? htmlResponse(ACCOUNT_PAGE)
+				: redirect(`/login${new URL(request.url).search}`);
+		}
+	}
+	if (first === "logout" && parts.length === 1 && request.method === "POST") {
+		if (!isSameOrigin(request)) {
+			return jsonError("请求来源无效", 403);
+		}
+		const session = await currentSession(request, registry);
+		if (session) {
+			await registry.deleteSession(session.hash);
+		}
+		const next = safeNext(new URL(request.url).searchParams.get("next"));
+		const response = redirect(
+			next ? `/login?next=${encodeURIComponent(next)}` : "/login",
+			303,
+		);
+		response.headers.set("Set-Cookie", sessionCookie("", 0));
+		return response;
+	}
+	if (first !== "api") {
+		return notFound();
+	}
+	if (
+		request.method === "POST" &&
+		!(
+			isSameOrigin(request) &&
+			(request.headers.get("Content-Type") ?? "").startsWith("application/json")
+		)
+	) {
+		return jsonError("请求来源无效", 403);
+	}
+
+	const path = rest.join("/");
+	if (path === "login" && request.method === "POST") {
+		return login(request, registry);
+	}
+	if (path === "logout" && request.method === "POST") {
+		const session = await currentSession(request, registry);
+		if (session) {
+			await registry.deleteSession(session.hash);
+		}
+		return Response.json(
+			{},
+			{ headers: { "Set-Cookie": sessionCookie("", 0) } },
+		);
+	}
+
+	const session = await currentSession(request, registry);
+	if (!session) {
+		return jsonError("请先登录", 401);
+	}
+	const { user } = session;
+
+	if (path === "me" && request.method === "GET") {
+		if (user.mustChangePassword) {
+			return Response.json({ user, keys: [], devices: [], apps: [] });
+		}
+		const [keys, devices, apps] = await Promise.all([
+			registry.listKeys(user.id),
+			hubOf(env, user.id).listDevices(),
+			listApps(env, user.id),
+		]);
+		return Response.json({ user, keys, devices, apps });
+	}
+	if (path === "me/password" && request.method === "POST") {
+		return changePassword(request, registry, session);
+	}
+	if (user.mustChangePassword) {
+		return jsonError("请先修改初始密码", 403);
+	}
+	if (request.method !== "POST") {
+		return notFound();
+	}
+
+	if (path === "me/keys") {
+		const body = await readJson(request);
+		const name = typeof body.name === "string" ? body.name.trim() : "";
+		if (!name || name.length > 64) {
+			return jsonError("请填写名称，不超过 64 个字符");
+		}
+		if (body.type !== "device" && body.type !== "connector") {
+			return jsonError("密钥类型无效");
+		}
+		const result = await registry.createKey(user.id, name, [
+			body.type satisfies Scope,
+		]);
+		return result.ok
+			? Response.json({ key: result.key, token: result.token })
+			: jsonError(result.error);
+	}
+
+	const segments = path.split("/");
+	const [me, kind, id, action] = segments;
+	if (
+		me !== "me" ||
+		segments.length !== 4 ||
+		!id ||
+		!/^[A-Za-z0-9:_-]+$/.test(id)
+	) {
+		return notFound();
+	}
+	if (kind === "keys" && action === "revoke") {
+		const found = await registry.revokeKey(user.id, id);
+		return found ? Response.json({}) : jsonError("密钥不存在", 404);
+	}
+	if (kind === "devices" && action === "remove") {
+		const hub = hubOf(env, user.id);
+		const device = (await hub.listDevices()).find((d) => d.id === id);
+		if (!device) {
+			return jsonError("电脑不存在", 404);
+		}
+		if (device.keyId) {
+			await registry.revokeKey(user.id, device.keyId);
+		}
+		await hub.removeDevice(id);
+		return Response.json({});
+	}
+	if (kind === "apps" && action === "revoke") {
+		await oauthOf(env).revokeGrant(id, user.id);
+		return Response.json({});
+	}
+	return notFound();
+}
+
+async function login(
+	request: Request,
+	registry: RegistryStub,
+): Promise<Response> {
+	const body = await readJson(request);
+	const username = normalizeUsername(body.username);
+	const password = typeof body.password === "string" ? body.password : "";
+	if (!username || !password || password.length > MAX_PASSWORD_LENGTH) {
+		return jsonError("用户名或密码不正确", 401);
+	}
+	const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+	const check = await registry.beginLogin(username, ip);
+	if (check.limited) {
+		return jsonError("登录失败次数过多，请 15 分钟后再试", 429);
+	}
+	const ok = check.user
+		? await verifyPassword(password, check.user.passwordHash)
+		: await verifyDummy(password);
+	if (!ok || !check.user) {
+		await registry.recordLoginFailure(username, ip);
+		return jsonError("用户名或密码不正确", 401);
+	}
+	const token = await registry.createSession(check.user.id, username);
+	return Response.json(
+		{},
+		{ headers: { "Set-Cookie": sessionCookie(token, SESSION_TTL_MS / 1000) } },
+	);
+}
+
+async function changePassword(
+	request: Request,
+	registry: RegistryStub,
+	session: Session,
+): Promise<Response> {
+	const { current, next } = await readJson(request);
+	const problem = passwordProblem(next);
+	if (problem || typeof next !== "string") {
+		return jsonError(problem ?? "请填写新密码");
+	}
+	const stored = await registry.passwordHashOf(session.user.id);
+	if (
+		!stored ||
+		typeof current !== "string" ||
+		current.length > MAX_PASSWORD_LENGTH ||
+		!(await verifyPassword(current, stored))
+	) {
+		return jsonError("当前密码不正确");
+	}
+	if (current === next) {
+		return jsonError("新密码不能与当前密码相同");
+	}
+	await registry.setPassword(
+		session.user.id,
+		await hashPassword(next),
+		false,
+		session.hash,
+	);
+	return Response.json({});
+}

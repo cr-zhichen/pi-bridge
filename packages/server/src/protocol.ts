@@ -45,7 +45,7 @@ export const CLOSE_REPLACED = 4001;
  * CLI 读不到 WebSocket 握手失败时的 HTTP 响应，所以服务端先接受连接再用这个关闭码关闭。
  */
 export const CLOSE_INCOMPATIBLE = 4002;
-/** WebSocket 关闭码：密钥被重置或用户被禁用。 */
+/** WebSocket 关闭码：密钥被吊销或用户被禁用。 */
 export const CLOSE_REVOKED = 4003;
 
 export interface Image {
@@ -146,4 +146,6 @@ export interface DeviceInfo {
 	version: string;
 	online: boolean;
 	lastSeen: number;
+	/** 最近一次连接用的密钥 ID。 */
+	keyId?: string;
 }

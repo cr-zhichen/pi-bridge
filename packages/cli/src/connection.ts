@@ -9,7 +9,7 @@ import {
 } from "../../server/src/protocol.ts";
 import pkg from "../package.json" with { type: "json" };
 import { type Bridge, log } from "./bridge.ts";
-import type { Config } from "./config.ts";
+import { accountUrl, type Config } from "./config.ts";
 
 const PING_INTERVAL_MS = 20_000;
 /** 这么久没有收到任何消息，就认为连接已失效并重连。 */
@@ -36,8 +36,12 @@ export function connect(
 
 	const attempt = async () => {
 		const devices = await fetchDevices(config);
-		if (devices === 401) {
-			log("密钥无效或用户已被禁用。请向管理员确认后重新运行 pi-bridge login");
+		if (devices === 401 || devices === 403) {
+			log(
+				devices === 401
+					? `密钥无效、已被吊销或用户已被禁用。${relogin(config)}`
+					: `这个密钥不能用来连接电脑。${relogin(config)}`,
+			);
 			stop();
 			return;
 		}
@@ -71,9 +75,7 @@ export function connect(
 				);
 				stop();
 			} else if (code === CLOSE_REVOKED) {
-				log(
-					"密钥已失效或用户已被禁用。请向管理员确认后重新运行 pi-bridge login",
-				);
+				log(`密钥已被吊销或用户已被禁用。${relogin(config)}`);
 				stop();
 			} else if (code === CLOSE_INCOMPATIBLE) {
 				log(
@@ -116,6 +118,10 @@ export function connect(
 	};
 
 	void attempt();
+}
+
+function relogin(config: Config): string {
+	return `请在 ${accountUrl(config.server)} 重新添加这台电脑，用生成的命令登录`;
 }
 
 /** 该用户的电脑列表；请求失败时返回 HTTP 状态码，网络不通时返回 undefined。 */
