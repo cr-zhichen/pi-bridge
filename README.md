@@ -6,7 +6,7 @@ pi-bridge 让 Claude 和 ChatGPT 网页版调用你电脑上的 [Pi](https://pi.
 
 ## 部署服务端
 
-需要一个 Cloudflare 账号，免费套餐即可。两种方式任选其一。
+需要一个 Cloudflare 账号并启用 R2，免费套餐即可。两种方式任选其一。
 
 ### 一键部署
 
@@ -24,6 +24,10 @@ pi-bridge 让 Claude 和 ChatGPT 网页版调用你电脑上的 [Pi](https://pi.
 升级时在 Fork 页面点击 **Sync fork → Update branch**，Cloudflare 会自动重新部署，用户和设备数据都会保留。
 
 服务端用一个名为 `OAUTH_KV` 的 KV 命名空间保存网页版连接器的授权，部署时自动创建，不需要手动配置。
+
+### 临时文件
+
+部署后，在 Worker 的 **Bindings** 找到 `TRANSFER_FILES` 对应的存储桶，保持存储桶私有，并[设置对象生命周期规则](https://developers.cloudflare.com/r2/buckets/object-lifecycles/#dashboard)，将 `transfers/` 下的文件设为 1 天后删除。
 
 ### 创建用户
 

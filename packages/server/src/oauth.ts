@@ -5,7 +5,7 @@ import {
 	type OAuthResourceContext,
 } from "@cloudflare/workers-oauth-provider";
 import { handleMcp } from "./mcp.ts";
-import { hubOf, registryOf } from "./stubs.ts";
+import { registryOf } from "./stubs.ts";
 
 /**
  * 网页版连接器的 OAuth：
@@ -98,7 +98,7 @@ const apiHandler: ExportedHandler<Env> &
 		if (!allowed) {
 			return new Response("用户已被禁用", { status: 403 });
 		}
-		return handleMcp(request, hubOf(env, props.userId));
+		return handleMcp(request, env, props.userId);
 	},
 };
 

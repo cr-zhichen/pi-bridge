@@ -150,11 +150,11 @@ ${PAGE_HEAD}
 		<span style="display:flex;align-items:center;min-width:0"><span class="avatar">${escapeHtml(initial(user.name))}</span>${escapeHtml(who)}</span>
 		<form method="post" action="/logout?next=${encodeURIComponent(here)}"><button class="link">切换账号</button></form>
 	</div>
-	<span class="label">允许后，${name} 可以在你在线的电脑上</span>
+	<span class="label">允许后，${name} 可以</span>
 	<ul class="perms">
-		<li>运行命令</li>
-		<li>读取和修改文件</li>
+		<li>在你在线的电脑上运行命令、读取和修改文件</li>
 		<li>使用 Pi 已安装的工具、Skills 和 MCP</li>
+		<li>上传和分享临时文件</li>
 	</ul>
 	<form method="post" action="/authorize" class="buttons">
 		<input type="hidden" name="handle" value="${escapeHtml(handle)}">
