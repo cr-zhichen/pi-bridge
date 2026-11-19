@@ -6,6 +6,7 @@ import { providerFor } from "./oauth.ts";
 import { Registry, type Scope } from "./registry.ts";
 import { redirect } from "./session.ts";
 import { hashToken, hubOf, registryOf } from "./stubs.ts";
+import { handleTransfer, TRANSFER_ID_PATTERN } from "./transfers.ts";
 import { UserHub } from "./user-hub.ts";
 
 export { Registry, UserHub };
@@ -23,6 +24,7 @@ const KEY_ACTIONS = new Map<string, Scope>([
  * - /authorize、/oauth/...、/.well-known/...  OAuth 授权与发现
  * - /login、/account、/api/...  用户的账号页，使用用户名和密码登录
  * - /admin               管理页，使用 ADMIN_KEY 登录
+ * - /transfers/<文件 ID> 临时文件上传与下载，使用对应的短效令牌
  * - /<密钥>/mcp          带密钥的 MCP 地址，给不支持 OAuth 的客户端，需要连接器密钥
  * - /<密钥>/connect      本机 CLI 的 WebSocket 连接，需要设备密钥
  * - /<密钥>/devices      该用户的设备列表，CLI 的 login 和 status 使用，需要设备密钥
@@ -40,6 +42,12 @@ const routes = {
 		}
 		if (ACCOUNT_ROUTES.has(parts[0] ?? "")) {
 			return handleAccount(request, env, parts);
+		}
+		if (parts[0] === "transfers") {
+			const [, fileId] = parts;
+			return parts.length === 2 && fileId && TRANSFER_ID_PATTERN.test(fileId)
+				? handleTransfer(request, env.TRANSFER_FILES, url, fileId)
+				: notFound();
 		}
 
 		const [token, action] = parts;
@@ -59,17 +67,16 @@ const routes = {
 				403,
 			);
 		}
-		const hub = hubOf(env, auth.userId);
 		switch (action) {
 			case "connect": {
 				// 告诉 UserHub 这次连接用的是哪个密钥，覆盖客户端自己带的同名参数
 				url.searchParams.set("key", auth.keyId);
-				return hub.fetch(new Request(url, request));
+				return hubOf(env, auth.userId).fetch(new Request(url, request));
 			}
 			case "devices":
-				return Response.json(await hub.listDevices());
+				return Response.json(await hubOf(env, auth.userId).listDevices());
 			default:
-				return handleMcp(request, hub);
+				return handleMcp(request, env, auth.userId);
 		}
 	},
 };

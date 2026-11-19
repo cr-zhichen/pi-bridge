@@ -13,6 +13,13 @@ import {
 	type SkillSummary,
 	WAIT_MS,
 } from "./protocol.ts";
+import { hubOf } from "./stubs.ts";
+import {
+	createUpload,
+	expireFile,
+	getDownloadLink,
+	TRANSFER_ID_PATTERN,
+} from "./transfers.ts";
 import type { Result, UserHub } from "./user-hub.ts";
 
 type Hub = DurableObjectStub<UserHub>;
@@ -21,22 +28,30 @@ const WAIT_SECONDS = WAIT_MS / 1000;
 
 const INSTRUCTIONS = `pi-bridge 让你在用户的电脑上读写文件、运行命令，并使用电脑上 Pi 已安装的工具和 Skills。
 
-1. 先调用 open_session 打开要操作的目录，之后的调用都带上返回的 session_id。
+1. 操作电脑前，先调用 open_session 打开目录，需要 session_id 时使用它返回的值。
 2. open_session 会列出该目录适用的项目说明文件（如 AGENTS.md），开始工作前先用 call 调用 read 读取它们。
 3. open_session 还会列出电脑上可用的 Skills。任务符合某个 Skill 的描述时，先用 call 调用 read 读取它的 SKILL.md，再按说明操作。
 4. 运行命令用 run；读取、搜索、修改文件用 call 调用 read、grep、find、ls、edit、write。
 5. list_capabilities 列出扩展和 MCP 服务器提供的其他工具。
 6. run 和 call 最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id，用 wait 继续获取输出，用 cancel 停止。`;
 
-export function handleMcp(request: Request, hub: Hub): Promise<Response> {
-	return createMcpHandler(() => buildServer(hub)).fetch(request);
+export function handleMcp(
+	request: Request,
+	env: Env,
+	userId: string,
+): Promise<Response> {
+	const origin = new URL(request.url).origin;
+	return createMcpHandler(() => buildServer(env, origin, userId)).fetch(
+		request,
+	);
 }
 
-function buildServer(hub: Hub): McpServer {
+function buildServer(env: Env, origin: string, userId: string): McpServer {
 	const server = new McpServer(
 		{ name: "pi-bridge", version: pkg.version },
 		{ instructions: INSTRUCTIONS },
 	);
+	const hub = hubOf(env, userId);
 	const sessionId = z.string().describe("open_session 返回的 session_id");
 	const jobId = z.string().describe("run 或 call 返回的 job_id");
 
@@ -179,7 +194,75 @@ function buildServer(hub: Hub): McpServer {
 			jobResult(await forward(hub, "cancel", { jobId: job_id })),
 	);
 
+	registerTransferTools(server, env.TRANSFER_FILES, origin, userId);
 	return server;
+}
+
+function registerTransferTools(
+	server: McpServer,
+	bucket: R2Bucket,
+	origin: string,
+	userId: string,
+): void {
+	const fileId = z
+		.string()
+		.regex(TRANSFER_ID_PATTERN)
+		.describe("create_upload 返回的 file_id");
+
+	server.registerTool(
+		"create_upload",
+		{
+			title: "申请上传临时文件",
+			description:
+				"为一个文件申请临时上传地址和令牌。按结果中的用法发送文件，上传成功后可获取下载链接。",
+			inputSchema: z.object({
+				file_name: z
+					.string()
+					.trim()
+					.min(1)
+					.max(255)
+					.regex(/^[^/\\\p{Cc}]+$/u)
+					.describe("含扩展名的文件名"),
+			}),
+			annotations: { destructiveHint: false, openWorldHint: false },
+		},
+		async ({ file_name }) =>
+			textResult(
+				JSON.stringify(await createUpload(bucket, origin, userId, file_name)),
+			),
+	);
+
+	server.registerTool(
+		"get_download_link",
+		{
+			title: "获取下载链接",
+			description: "为已上传且仍在保留期内的临时文件获取新的下载链接。",
+			inputSchema: z.object({ file_id: fileId }),
+			annotations: { readOnlyHint: true, openWorldHint: false },
+		},
+		async ({ file_id }) => {
+			const result = await getDownloadLink(bucket, origin, userId, file_id);
+			return result
+				? textResult(JSON.stringify(result))
+				: errorResult(
+						"文件尚未上传、已过期或无法访问。请检查文件 ID，过期后请重新上传",
+					);
+		},
+	);
+
+	server.registerTool(
+		"expire_file",
+		{
+			title: "删除临时文件",
+			description: "删除暂存的文件并立即使下载链接失效。文件确认用完后可调用。",
+			inputSchema: z.object({ file_id: fileId }),
+			annotations: { destructiveHint: true, openWorldHint: false },
+		},
+		async ({ file_id }) =>
+			(await expireFile(bucket, userId, file_id))
+				? textResult("已删除临时文件")
+				: errorResult("文件已删除或无法访问，请检查文件 ID"),
+	);
 }
 
 async function forward<K extends Exclude<OpName, "open_session">>(
