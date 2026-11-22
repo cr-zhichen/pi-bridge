@@ -157,11 +157,14 @@ ${PAGE_HEAD}
 						<div class="field"><label class="label" for="url-key-name">名称</label><input class="input" id="url-key-name" placeholder="例如：公司内部工具" maxlength="64" autocomplete="off" required></div>
 						<fieldset class="device-choice">
 							<legend class="sr-only">允许访问的电脑</legend>
-							<div class="choice-head">
-								<span class="label">允许访问的电脑</span>
-								<button type="button" class="link" id="url-key-toggle" hidden>全选</button>
+							<label class="check choice-all"><input type="checkbox" name="allDevices"><span>允许访问全部电脑（包括以后添加的电脑）</span></label>
+							<div id="url-key-selected">
+								<div class="choice-head">
+									<span class="label">选择电脑</span>
+									<button type="button" class="link" id="url-key-toggle" hidden>全选当前电脑</button>
+								</div>
+								<div id="url-key-devices"></div>
 							</div>
-							<div id="url-key-devices"></div>
 						</fieldset>
 						<div class="url-key-foot">
 							<label class="check"><input type="checkbox" id="url-key-ack" required><span>确认该客户端不支持 OAuth</span></label>
@@ -192,8 +195,8 @@ ${PAGE_HEAD}
 			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<form id="add-form">
-			<span class="label">电脑名称</span>
-			<input class="input" id="add-name" placeholder="例如：MacBook Pro" maxlength="64" autocomplete="off" required>
+			<label class="label" for="add-name">电脑名称（选填）</label>
+			<input class="input" id="add-name" placeholder="例如：MacBook Pro" maxlength="64" autocomplete="off">
 			<div class="modal-foot"><span></span><button class="btn primary">生成命令</button></div>
 		</form>
 		<div id="add-commands" hidden>
@@ -222,11 +225,14 @@ ${PAGE_HEAD}
 		</div>
 		<fieldset class="device-choice">
 			<legend class="sr-only">选择可访问的电脑</legend>
-			<div class="choice-head">
-				<span class="label" id="access-count"></span>
-				<button type="button" class="link" id="access-toggle" hidden>全选</button>
+			<label class="check choice-all"><input type="checkbox" name="allDevices"><span>允许访问全部电脑（包括以后添加的电脑）</span></label>
+			<div id="access-selected">
+				<div class="choice-head">
+					<span class="label" id="access-count"></span>
+					<button type="button" class="link" id="access-toggle" hidden>全选当前电脑</button>
+				</div>
+				<div id="access-devices"></div>
 			</div>
-			<div id="access-devices"></div>
 		</fieldset>
 		<div class="dialog-actions">
 			<button type="button" class="btn" data-close>取消</button>
@@ -315,7 +321,7 @@ function syncChoiceToggle(container, toggle) {
 	const inputs = Array.from(container.querySelectorAll('input[name="deviceId"]'));
 	toggle.hidden = inputs.length < 2;
 	if (inputs.length >= 2) {
-		toggle.textContent = inputs.every((input) => input.checked) ? "清空" : "全选";
+		toggle.textContent = inputs.every((input) => input.checked) ? "清空" : "全选当前电脑";
 	}
 }
 
@@ -350,17 +356,26 @@ function selectedDevices(form) {
 	return new FormData(form).getAll("deviceId");
 }
 
+function accessChoice(form) {
+	return form.elements.allDevices.checked
+		? { accessMode: "all" }
+		: { accessMode: "selected", deviceIds: selectedDevices(form) };
+}
+
 function deviceChip(device) {
 	return el("span", { className: "device-chip", title: device.online ? "在线" : "离线" },
 		el("span", { className: "dot" + (device.online ? " on" : "") }),
 		el("span", { textContent: device.name }));
 }
 
-function deviceScope(deviceIds, reconnectHint) {
-	if (deviceIds === null) {
+function deviceScope(deviceAccess, reconnectHint) {
+	if (deviceAccess === null) {
 		return { badge: badge("已失效", "warn"), hint: reconnectHint, chips: null };
 	}
-	const matched = me.devices.filter((device) => deviceIds.includes(device.id));
+	if (deviceAccess.mode === "all") {
+		return { badge: badge("全部电脑"), hint: null, chips: null };
+	}
+	const matched = me.devices.filter((device) => deviceAccess.deviceIds.includes(device.id));
 	if (!matched.length) {
 		return { badge: badge("未选择电脑", "warn"), hint: null, chips: null };
 	}
@@ -368,19 +383,22 @@ function deviceScope(deviceIds, reconnectHint) {
 }
 
 function updateAccessState() {
+	const all = $("access-form").elements.allDevices.checked;
 	const count = selectedDevices($("access-form")).length;
-	$("access-save").disabled = count === 0;
+	$("access-selected").hidden = all;
+	$("access-save").disabled = !all && count === 0;
 	$("access-count").textContent = me?.devices.length ? (count ? "已选 " + count + " 台" : "请至少选择 1 台") : "暂无电脑";
 	syncChoiceToggle($("access-devices"), $("access-toggle"));
 }
 
-function editAccessButton(connectorId, name, deviceIds) {
-	if (deviceIds === null) return null;
+function editAccessButton(connectorId, name, deviceAccess) {
+	if (deviceAccess === null) return null;
 	const node = el("button", { type: "button", className: "btn small", textContent: "选择电脑" });
 	node.onclick = () => {
 		$("access-form").dataset.connectorId = connectorId;
+		$("access-form").elements.allDevices.checked = deviceAccess.mode === "all";
 		$("access-name").textContent = name;
-		showDeviceChoices($("access-devices"), $("access-toggle"), deviceIds);
+		showDeviceChoices($("access-devices"), $("access-toggle"), deviceAccess.deviceIds);
 		updateAccessState();
 		openModal("modal-access");
 	};
@@ -389,7 +407,7 @@ function editAccessButton(connectorId, name, deviceIds) {
 
 function renderApps() {
 	const rows = me.apps.map((app) => {
-		const scope = deviceScope(app.deviceIds, "请在客户端重新授权");
+		const scope = deviceScope(app.deviceAccess, "请在客户端重新授权");
 		const origin = app.clientDomain ? "来自 " + app.clientDomain : app.redirectHost + "（未验证）";
 		return row({
 			lead: el("span", { className: "icon", textContent: initial(app.clientName) }),
@@ -398,7 +416,7 @@ function renderApps() {
 			meta: [origin, formatDate(app.createdAt) + "授权", scope.hint].filter(Boolean).join(" · "),
 			extra: scope.chips,
 			status: app.lastUsedAt ? ago(app.lastUsedAt) + "使用" : "尚未使用",
-			actions: [editAccessButton(app.connectorId, app.clientName, app.deviceIds), button("撤销", "", async () => {
+			actions: [editAccessButton(app.connectorId, app.clientName, app.deviceAccess), button("撤销", "", async () => {
 				if (!await confirmDialog({
 					title: "撤销「" + app.clientName + "」的授权？",
 					message: "撤销后它将无法访问你的电脑，如需继续使用请重新授权。",
@@ -417,22 +435,24 @@ function renderUrlKeys() {
 	const checked = selectedDevices($("url-key-form"));
 	showDeviceChoices($("url-key-devices"), $("url-key-toggle"), checked);
 	updateUrlKeyButton();
-	const keys = me.keys.filter((key) => only(key, "connector"));
+	const keys = me.keys.filter((key) => key.scopes.includes("connector"));
 	$("url-keys").hidden = keys.length === 0;
 	$("url-keys").replaceChildren(...(keys.length ? [
 		el("div", { className: "list-head", textContent: "已创建的地址" }),
 		...keys.map((key) => {
-			const scope = deviceScope(key.deviceIds, "请重新生成地址");
+			const scope = deviceScope(key.deviceAccess, "请重新生成地址");
 			return row({
 				title: key.name,
 				badges: [scope.badge],
-				meta: ["密钥 …" + key.hint, formatDate(key.createdAt) + "创建", scope.hint].filter(Boolean).join(" · "),
+				meta: [key.hint ? "密钥 …" + key.hint : null, formatDate(key.createdAt) + "创建", scope.hint].filter(Boolean).join(" · "),
 				extra: scope.chips,
 				status: key.lastUsedAt ? ago(key.lastUsedAt) + "使用" : "尚未使用",
-				actions: [editAccessButton(key.id, key.name, key.deviceIds), button("删除", "danger", async () => {
+				actions: [editAccessButton(key.id, key.name, key.deviceAccess), button("删除", "danger", async () => {
 					if (!await confirmDialog({
 						title: "删除「" + key.name + "」？",
-						message: "删除后，使用该地址的客户端将无法再连接。",
+						message: isLegacy(key)
+							? "删除后，使用这个密钥的客户端和电脑都会断开。"
+							: "删除后，使用该地址的客户端将无法再连接。",
 						confirmText: "删除", danger: true,
 					})) return;
 					await api("me/keys/" + key.id + "/revoke", {});
@@ -617,7 +637,9 @@ $("revoke-legacy").onclick = (event) => act(event.currentTarget, async () => {
 });
 
 function updateUrlKeyButton() {
-	$("url-key-create").disabled = !$("url-key-ack").checked || selectedDevices($("url-key-form")).length === 0;
+	const all = $("url-key-form").elements.allDevices.checked;
+	$("url-key-selected").hidden = all;
+	$("url-key-create").disabled = !$("url-key-ack").checked || (!all && selectedDevices($("url-key-form")).length === 0);
 	syncChoiceToggle($("url-key-devices"), $("url-key-toggle"));
 }
 
@@ -628,9 +650,9 @@ $("access-form").onchange = updateAccessState;
 $("access-form").onsubmit = (event) => {
 	event.preventDefault();
 	const form = event.currentTarget;
-	const deviceIds = selectedDevices(form);
+	const access = accessChoice(form);
 	act(event.submitter, async () => {
-		await api("me/connectors/" + form.dataset.connectorId + "/devices", { deviceIds });
+		await api("me/connectors/" + form.dataset.connectorId + "/devices", access);
 		$("modal-access").close();
 		toast("已保存");
 	});
@@ -639,9 +661,9 @@ $("access-form").onsubmit = (event) => {
 $("url-key-form").onchange = updateUrlKeyButton;
 $("url-key-form").onsubmit = (event) => {
 	event.preventDefault();
-	const deviceIds = selectedDevices(event.currentTarget);
+	const access = accessChoice(event.currentTarget);
 	act(event.submitter, async () => {
-		const { key, token } = await api("me/keys", { name: $("url-key-name").value, type: "connector", deviceIds });
+		const { key, token } = await api("me/keys", { name: $("url-key-name").value, type: "connector", ...access });
 		$("url-key-form").reset();
 		$("secret-title").textContent = "已生成「" + key.name + "」的地址";
 		$("secret-body").replaceChildren(copyRow(location.origin + "/" + token + "/mcp"));
@@ -679,7 +701,7 @@ $("add-form").onsubmit = async (event) => {
 		const { key, token } = await api("me/keys", { name, type: "device" });
 		const commands = [
 			["安装（已安装可跳过）", "npm install -g @zgccrui/pi-bridge"],
-			["登录", "pi-bridge login " + location.origin + " " + token + " --name " + shellQuote(name)],
+			["登录", "pi-bridge login " + location.origin + " " + token + (name ? " --name " + shellQuote(name) : "")],
 			["启动", "pi-bridge start",
 				el("p", { className: "note" }, "如需开机自启，改用 ", el("code", { textContent: "pi-bridge service install" }))],
 		];

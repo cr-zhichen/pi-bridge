@@ -77,7 +77,8 @@ const routes = {
 				return Response.json(await hubOf(env, auth.userId).listDevices());
 			default:
 				if (
-					(await hubOf(env, auth.userId).connectorDevices(auth.keyId)) === null
+					(await hubOf(env, auth.userId).connectorAccess(auth.keyId, true)) ===
+					null
 				) {
 					return jsonError("请在账号页重新生成带密钥的地址。", 403);
 				}

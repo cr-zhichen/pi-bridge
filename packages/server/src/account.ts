@@ -1,7 +1,7 @@
 import { ACCOUNT_PAGE } from "./account-page.ts";
 import { handleAuthorize } from "./authorize.ts";
 import { jsonError, notFound, readJson } from "./http.ts";
-import { listApps, listGrants, revokeApp } from "./oauth.ts";
+import { isLegacyApp, listApps, listGrants, revokeApp } from "./oauth.ts";
 import { htmlResponse } from "./page.ts";
 import {
 	hashPassword,
@@ -21,6 +21,7 @@ import {
 	sessionCookie,
 } from "./session.ts";
 import { hubOf, registryOf } from "./stubs.ts";
+import { ALL_DEVICES } from "./user-hub.ts";
 
 /** 这些路径由 handleAccount 处理。 */
 export const ACCOUNT_ROUTES = new Set([
@@ -43,7 +44,7 @@ export const ACCOUNT_ROUTES = new Set([
  * - POST /api/me/password             { current, next }
  * - POST /api/me/keys                 创建设备密钥或带密钥的连接器地址
  * - POST /api/me/keys/<id>/revoke
- * - POST /api/me/connectors/<id>/devices  { deviceIds }，修改允许访问的电脑
+ * - POST /api/me/connectors/<id>/devices  { accessMode, deviceIds }，修改允许访问的电脑
  * - POST /api/me/devices/<id>/remove  移除电脑并吊销它使用的密钥
  * - POST /api/me/devices/<id>/delegation  { enabled }，设置是否允许委派任务给 Pi
  * - POST /api/me/apps/<id>/revoke     撤销 OAuth 授权
@@ -134,7 +135,13 @@ export async function handleAccount(
 		const apps = await listApps(env, user.id, access);
 		return Response.json({
 			user,
-			keys: keys.map((key) => ({ ...key, deviceIds: access[key.id] ?? null })),
+			keys: keys.map((key) => ({
+				...key,
+				deviceAccess:
+					access[key.id] === undefined && key.scopes.includes("connector")
+						? ALL_DEVICES
+						: (access[key.id] ?? null),
+			})),
 			devices,
 			apps,
 		});
@@ -151,17 +158,25 @@ export async function handleAccount(
 
 	if (path === "me/keys") {
 		const body = await readJson(request);
-		const name = typeof body.name === "string" ? body.name.trim() : "";
-		if (!name || name.length > 64) {
-			return jsonError("请填写名称，不超过 64 个字符");
-		}
 		if (body.type !== "device" && body.type !== "connector") {
 			return jsonError("密钥类型无效");
 		}
+		const label = body.type === "device" ? "电脑名称" : "地址名称";
+		if (body.name !== undefined && typeof body.name !== "string") {
+			return jsonError(`请填写有效的${label}`);
+		}
+		const name = body.name?.trim() ?? "";
+		if (name.length > 64) {
+			return jsonError(`${label}不能超过 64 个字符`);
+		}
+		if (body.type === "connector" && !name) {
+			return jsonError("请填写地址名称");
+		}
 		const result = await registry.createKey(
 			user.id,
-			name,
+			name || "新电脑",
 			body.type,
+			body.accessMode,
 			body.deviceIds,
 		);
 		return result.ok
@@ -184,8 +199,19 @@ export async function handleAccount(
 		return found ? Response.json({}) : jsonError("密钥不存在", 404);
 	}
 	if (kind === "connectors" && action === "devices") {
-		const { deviceIds } = await readJson(request);
-		const result = await hub.updateConnectorDevices(id, deviceIds);
+		const { accessMode, deviceIds } = await readJson(request);
+		const legacy = id.startsWith("oauth:")
+			? (await listGrants(env, user.id)).some((grant) => isLegacyApp(grant, id))
+			: /^[a-f0-9]{16}$/.test(id) &&
+				(await registry.listKeys(user.id)).some(
+					(key) => key.id === id && key.scopes.includes("connector"),
+				);
+		const result = await hub.updateConnectorAccess(
+			id,
+			accessMode,
+			deviceIds,
+			legacy,
+		);
 		if (!result) {
 			return jsonError("连接器已失效，请重新连接。", 404);
 		}
