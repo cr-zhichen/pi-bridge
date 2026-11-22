@@ -52,11 +52,16 @@ ${PAGE_HEAD}
 	@media (prefers-reduced-motion: reduce) {
 		.switch, .switch[data-tip]::before, .switch[data-tip]::after, .switch input, .switch input::before { transition: none; }
 	}
+	.advanced-body > .card + .card { margin-top: 0; }
+	.url-key-form { box-shadow: none; padding: 16px; display: grid; gap: 16px; }
+	.url-key-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+		padding-top: 14px; border-top: 1px solid var(--border); }
 	@media (max-width: 640px) {
 		#devices .row-actions:has(.switch) { flex-basis: 100%; justify-content: space-between; padding-left: 22px; }
 		#devices .row-divider { display: none; }
 		.switch[data-tip]::before { left: 34px; right: auto; }
 		.switch[data-tip]::after { left: 0; right: auto; }
+		.url-key-foot { flex-direction: column; align-items: stretch; }
 	}
 </style>
 </head>
@@ -68,7 +73,7 @@ ${PAGE_HEAD}
 			${BRAND}
 			<h1>登录</h1>
 			<p class="lead">使用管理员为你创建的账号</p>
-			<div id="login-context" class="context" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>登录后继续授权连接器</span></div>
+			<div id="login-context" class="context" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>登录后继续授权应用</span></div>
 			<div class="field"><label class="label" for="username">用户名</label><input class="input" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
 			<div class="field"><label class="label" for="password">密码</label><input class="input" id="password" type="password" autocomplete="current-password" required></div>
 			<button class="btn primary wide auth-submit">登录</button>
@@ -83,7 +88,7 @@ ${PAGE_HEAD}
 		<form id="first-form" class="password-form">
 			${BRAND}
 			<h1>设置新密码</h1>
-			<p class="lead">当前是管理员生成的初始密码，修改后才能继续使用。</p>${PASSWORD_FIELDS}
+			<p class="lead">首次登录请修改初始密码。</p>${PASSWORD_FIELDS}
 			<button class="btn primary wide auth-submit">保存并继续</button>
 		</form>
 	</main>
@@ -105,8 +110,8 @@ ${PAGE_HEAD}
 		<div id="legacy" class="banner" hidden>
 			<span class="mark">!</span>
 			<div>
-				<strong>你还在使用升级前的旧密钥</strong>
-				<p>旧密钥既能连接电脑，又能当作连接器地址，一旦泄露会影响所有电脑。建议更换：网页版改用下面的 OAuth 连接器，每台电脑重新添加一次，都换完后吊销旧密钥。</p>
+				<strong>正在使用旧版密钥</strong>
+				<p>请重新添加标有「旧密钥」的电脑，全部更换后吊销旧密钥。</p>
 				<div class="actions"><button class="btn small" id="revoke-legacy">吊销旧密钥</button><button class="link" id="hide-legacy">稍后提醒</button></div>
 			</div>
 		</div>
@@ -115,26 +120,26 @@ ${PAGE_HEAD}
 			<div class="block-head">
 				<div>
 					<h2>连接网页版 AI</h2>
-					<p class="sub">在 Claude 或 ChatGPT 中添加连接器，登录并授权后即可使用你的电脑。</p>
+					<p class="sub">在 Claude 或 ChatGPT 中添加以下地址，登录后即可使用你的电脑。</p>
 				</div>
 			</div>
 			<div class="card">
 				<span class="label">连接器地址</span>
 				<div class="copy hero" id="connector-url"></div>
-				<p class="note">地址里不含密钥，每个人的都一样。添加时会跳转到这里登录，确认后才能使用。</p>
+				<p class="note">通用地址，不含密钥。添加后会跳转到此登录并授权。</p>
 				<div class="tabs" role="tablist">
 					<button class="tab on" data-tab="claude" role="tab">Claude</button>
 					<button class="tab" data-tab="chatgpt" role="tab">ChatGPT</button>
 				</div>
 				<ol class="steps" data-panel="claude">
 					<li><div>在侧边栏打开 <span class="ui">插件 → 连接器</span>，点击 <span class="ui">添加自定义连接器</span></div></li>
-					<li><div>粘贴上面的地址。身份验证选 <span class="ui">立即登录</span>，OAuth 客户端保持默认的 <span class="ui">使用 Claude 的已发布身份</span></div></li>
-					<li><div>点击 <span class="ui">添加</span>，在弹出的页面登录 pi-bridge 并允许访问</div></li>
+					<li><div>粘贴上方地址，身份验证选 <span class="ui">立即登录</span>，OAuth 客户端保持默认</div></li>
+					<li><div>点击 <span class="ui">添加</span>，登录后选择允许访问的电脑</div></li>
 				</ol>
 				<ol class="steps" data-panel="chatgpt" hidden>
 					<li><div>在侧边栏打开 <span class="ui">插件</span>，点击 <span class="ui">添加自定义 MCP 服务器</span></div></li>
-					<li><div>名称填 pi-bridge，连接选 <span class="ui">服务器 URL</span> 并粘贴上面的地址，身份验证选 <span class="ui">OAuth</span></div></li>
-					<li><div>勾选 <span class="ui">我已了解，并希望继续</span>，点击 <span class="ui">创建为插件</span>，在弹出的页面登录 pi-bridge 并允许访问</div></li>
+					<li><div>名称填 pi-bridge，连接选 <span class="ui">服务器 URL</span> 并粘贴上方地址，身份验证选 <span class="ui">OAuth</span></div></li>
+					<li><div>勾选确认提示并点击 <span class="ui">创建为插件</span>，登录后选择允许访问的电脑</div></li>
 				</ol>
 			</div>
 
@@ -144,15 +149,25 @@ ${PAGE_HEAD}
 			</div>
 
 			<details class="advanced" id="url-keys-section">
-				<summary>客户端不支持 OAuth？使用带密钥的地址</summary>
+				<summary>不支持 OAuth？使用带密钥的地址</summary>
 				<div class="advanced-body">
-					<div class="risk"><strong>带密钥的地址等同于密码。</strong>拿到它就能在你所有在线的电脑上执行命令，不经过登录和授权确认，而且容易随截图、浏览器历史泄露。只在客户端确实不支持 OAuth 时使用。</div>
+					<div class="risk"><strong>请妥善保管地址。</strong>拿到它就能在所选电脑上执行命令。</div>
 					<div class="card list" id="url-keys" style="box-shadow:none" hidden></div>
-					<form id="url-key-form" class="inline-form">
-						<input class="input" id="url-key-name" placeholder="用在哪里，例如：公司内部工具" maxlength="64" autocomplete="off" required>
-						<button class="btn" id="url-key-create" disabled>生成带密钥的地址</button>
+					<form id="url-key-form" class="card url-key-form">
+						<div class="field"><label class="label" for="url-key-name">名称</label><input class="input" id="url-key-name" placeholder="例如：公司内部工具" maxlength="64" autocomplete="off" required></div>
+						<fieldset class="device-choice">
+							<legend class="sr-only">允许访问的电脑</legend>
+							<div class="choice-head">
+								<span class="label">允许访问的电脑</span>
+								<button type="button" class="link" id="url-key-toggle" hidden>全选</button>
+							</div>
+							<div id="url-key-devices"></div>
+						</fieldset>
+						<div class="url-key-foot">
+							<label class="check"><input type="checkbox" id="url-key-ack" required><span>确认该客户端不支持 OAuth</span></label>
+							<button class="btn" id="url-key-create" disabled>生成地址</button>
+						</div>
 					</form>
-					<label class="check"><input type="checkbox" id="url-key-ack">我了解这个地址等同于密码，并确认我使用的客户端不支持 OAuth</label>
 				</div>
 			</details>
 		</section>
@@ -161,7 +176,7 @@ ${PAGE_HEAD}
 			<div class="block-head">
 				<div>
 					<h2>我的电脑</h2>
-					<p class="sub">每台电脑用自己的密钥登录，丢失或不再使用时，只移除那一台。</p>
+					<p class="sub">每台电脑独立连接，不再使用时移除即可。</p>
 				</div>
 				<button class="btn primary" id="open-add">添加电脑</button>
 			</div>
@@ -173,20 +188,19 @@ ${PAGE_HEAD}
 <dialog class="modal" id="modal-add" aria-labelledby="add-title">
 	<div class="modal-body">
 		<div class="modal-head">
-			<div><h3 id="add-title">添加电脑</h3><p class="sub">为这台电脑生成专用的登录命令。需要先安装 Pi 和 Node.js 22.19 以上。</p></div>
+			<div><h3 id="add-title">添加电脑</h3><p class="sub">需先安装 Node.js 22.19+ 和 Pi。</p></div>
 			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<form id="add-form">
 			<span class="label">电脑名称</span>
-			<input class="input" id="add-name" placeholder="例如 MacBook Pro" maxlength="64" autocomplete="off" required>
-			<p class="note">网页版 AI 在你有多台电脑在线时按这个名称选择。</p>
-			<div class="modal-foot"><span></span><button class="btn primary">生成登录命令</button></div>
+			<input class="input" id="add-name" placeholder="例如：MacBook Pro" maxlength="64" autocomplete="off" required>
+			<div class="modal-foot"><span></span><button class="btn primary">生成命令</button></div>
 		</form>
 		<div id="add-commands" hidden>
 			<ol class="steps" id="add-steps"></ol>
-			<p class="note">命令里的密钥只显示这一次。关闭后如果还没登录，在列表里取消这台电脑再重新添加即可。</p>
+			<p class="note">登录命令只显示一次；关闭后若未完成连接，可取消后重新添加。</p>
 			<div class="modal-foot">
-				<span class="waiting" id="add-waiting"><span class="dot wait"></span><span>等待这台电脑连接…</span></span>
+				<span class="waiting" id="add-waiting"><span class="dot wait"></span><span>等待电脑连接…</span></span>
 				<button type="button" class="btn" id="add-done" data-close>完成</button>
 			</div>
 		</div>
@@ -196,18 +210,39 @@ ${PAGE_HEAD}
 <dialog class="modal narrow" id="modal-password" aria-labelledby="password-title">
 	<form class="modal-body password-form" id="password-form">
 		<div class="modal-head"><h3 id="password-title">修改密码</h3><button type="button" class="link" data-close>关闭</button></div>${PASSWORD_FIELDS}
-		<div class="modal-foot"><span class="sub" style="margin:0">其他设备上的登录会失效</span><button class="btn primary">保存</button></div>
+		<div class="modal-foot"><span class="sub" style="margin:0">其他浏览器将退出登录</span><button class="btn primary">保存</button></div>
+	</form>
+</dialog>
+
+<dialog class="modal narrow" id="modal-access" aria-labelledby="access-title">
+	<form class="modal-body" id="access-form">
+		<div class="modal-head">
+			<div><h3 id="access-title">选择可访问的电脑</h3><p class="sub" id="access-name"></p></div>
+			<button type="button" class="link" data-close>关闭</button>
+		</div>
+		<fieldset class="device-choice">
+			<legend class="sr-only">选择可访问的电脑</legend>
+			<div class="choice-head">
+				<span class="label" id="access-count"></span>
+				<button type="button" class="link" id="access-toggle" hidden>全选</button>
+			</div>
+			<div id="access-devices"></div>
+		</fieldset>
+		<div class="dialog-actions">
+			<button type="button" class="btn" data-close>取消</button>
+			<button class="btn primary" id="access-save">保存</button>
+		</div>
 	</form>
 </dialog>
 
 <dialog class="modal" id="modal-secret" aria-labelledby="secret-title">
 	<div class="modal-body">
 		<div class="modal-head">
-			<div><h3 id="secret-title"></h3><p class="sub">地址里的密钥只显示这一次，请立即复制。</p></div>
+			<div><h3 id="secret-title"></h3><p class="sub">此地址只显示一次，请立即复制保存。</p></div>
 			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<div id="secret-body"></div>
-		<p class="note">添加到客户端时，身份验证选择「无需登录」或「无」。</p>
+		<p class="note">在客户端添加时，身份验证选「无」或「无需登录」。</p>
 	</div>
 </dialog>
 
@@ -246,14 +281,15 @@ function badge(text, kind) {
 	return el("span", { className: "badge" + (kind ? " " + kind : ""), textContent: text });
 }
 
-function row({ lead, title, badges = [], meta, status, statusOn, actions = [] }) {
+function row({ lead, title, badges = [], meta, extra, status, statusOn, actions = [] }) {
 	return el("div", { className: "row" },
 		lead,
 		el("div", { className: "row-main" },
 			el("div", { className: "row-title" }, el("span", { textContent: title }), ...badges.filter(Boolean)),
 			meta ? (Array.isArray(meta)
 				? el("div", { className: "row-meta" }, ...meta)
-				: el("div", { className: "row-meta", textContent: meta })) : null),
+				: el("div", { className: "row-meta", textContent: meta })) : null,
+			extra || null),
 		status ? el("div", { className: "row-status" + (statusOn ? " on" : ""), textContent: status }) : null,
 		actions.length ? el("div", { className: "row-actions" }, ...actions) : null,
 	);
@@ -274,43 +310,137 @@ const only = (key, scope) => key.scopes.length === 1 && key.scopes[0] === scope;
 
 // ---------- 连接网页版 AI ----------
 
+function syncChoiceToggle(container, toggle) {
+	if (!toggle) return;
+	const inputs = Array.from(container.querySelectorAll('input[name="deviceId"]'));
+	toggle.hidden = inputs.length < 2;
+	if (inputs.length >= 2) {
+		toggle.textContent = inputs.every((input) => input.checked) ? "清空" : "全选";
+	}
+}
+
+function bindChoiceToggle(container, toggle, onUpdate) {
+	toggle.onclick = () => {
+		const inputs = Array.from(container.querySelectorAll('input[name="deviceId"]'));
+		const next = inputs.some((input) => !input.checked);
+		for (const input of inputs) input.checked = next;
+		onUpdate();
+	};
+}
+
+function showDeviceChoices(container, toggle, deviceIds) {
+	if (!me.devices.length) {
+		container.replaceChildren(el("div", { className: "choice-empty", textContent: "请先在下方「我的电脑」中添加电脑。" }));
+		syncChoiceToggle(container, toggle);
+		return;
+	}
+	container.replaceChildren(el("div", { className: "choice-list" }, ...me.devices.map((device) =>
+		el("label", { className: "choice-item" },
+			el("input", { type: "checkbox", name: "deviceId", value: device.id, checked: deviceIds.includes(device.id) }),
+			el("span", { className: "choice-main" },
+				el("span", { className: "choice-name", textContent: device.name }),
+				device.platform ? el("span", { className: "choice-platform", textContent: platformName(device.platform) }) : null),
+			el("span", { className: "choice-status" + (device.online ? " on" : "") },
+				el("span", { className: "dot" + (device.online ? " on" : "") }),
+				device.online ? "在线" : "离线")))));
+	syncChoiceToggle(container, toggle);
+}
+
+function selectedDevices(form) {
+	return new FormData(form).getAll("deviceId");
+}
+
+function deviceChip(device) {
+	return el("span", { className: "device-chip", title: device.online ? "在线" : "离线" },
+		el("span", { className: "dot" + (device.online ? " on" : "") }),
+		el("span", { textContent: device.name }));
+}
+
+function deviceScope(deviceIds, reconnectHint) {
+	if (deviceIds === null) {
+		return { badge: badge("已失效", "warn"), hint: reconnectHint, chips: null };
+	}
+	const matched = me.devices.filter((device) => deviceIds.includes(device.id));
+	if (!matched.length) {
+		return { badge: badge("未选择电脑", "warn"), hint: null, chips: null };
+	}
+	return { badge: null, hint: null, chips: el("div", { className: "row-devices" }, ...matched.map(deviceChip)) };
+}
+
+function updateAccessState() {
+	const count = selectedDevices($("access-form")).length;
+	$("access-save").disabled = count === 0;
+	$("access-count").textContent = me?.devices.length ? (count ? "已选 " + count + " 台" : "请至少选择 1 台") : "暂无电脑";
+	syncChoiceToggle($("access-devices"), $("access-toggle"));
+}
+
+function editAccessButton(connectorId, name, deviceIds) {
+	if (deviceIds === null) return null;
+	const node = el("button", { type: "button", className: "btn small", textContent: "选择电脑" });
+	node.onclick = () => {
+		$("access-form").dataset.connectorId = connectorId;
+		$("access-name").textContent = name;
+		showDeviceChoices($("access-devices"), $("access-toggle"), deviceIds);
+		updateAccessState();
+		openModal("modal-access");
+	};
+	return node;
+}
+
 function renderApps() {
-	const rows = me.apps.map((app) => row({
-		lead: el("span", { className: "icon", textContent: initial(app.clientName) }),
-		title: app.clientName,
-		meta: (app.clientDomain ? "来自 " + app.clientDomain : "返回地址 " + app.redirectHost + " · 名称未经验证") + " · " + formatDate(app.createdAt) + "授权",
-		status: app.lastUsedAt ? ago(app.lastUsedAt) + "使用" : "尚未使用",
-		actions: [button("撤销", "", async () => {
-			if (!await confirmDialog({
-				title: "撤销「" + app.clientName + "」的授权？",
-				message: "它将无法再使用你的电脑。要继续使用，需要在客户端里重新连接并授权。",
-				confirmText: "撤销", danger: true,
-			})) return;
-			await api("me/apps/" + encodeURIComponent(app.id) + "/revoke", {});
-			toast("已撤销");
-		})],
-	}));
+	const rows = me.apps.map((app) => {
+		const scope = deviceScope(app.deviceIds, "请在客户端重新授权");
+		const origin = app.clientDomain ? "来自 " + app.clientDomain : app.redirectHost + "（未验证）";
+		return row({
+			lead: el("span", { className: "icon", textContent: initial(app.clientName) }),
+			title: app.clientName,
+			badges: [scope.badge],
+			meta: [origin, formatDate(app.createdAt) + "授权", scope.hint].filter(Boolean).join(" · "),
+			extra: scope.chips,
+			status: app.lastUsedAt ? ago(app.lastUsedAt) + "使用" : "尚未使用",
+			actions: [editAccessButton(app.connectorId, app.clientName, app.deviceIds), button("撤销", "", async () => {
+				if (!await confirmDialog({
+					title: "撤销「" + app.clientName + "」的授权？",
+					message: "撤销后它将无法访问你的电脑，如需继续使用请重新授权。",
+					confirmText: "撤销", danger: true,
+				})) return;
+				await api("me/apps/" + encodeURIComponent(app.id) + "/revoke", {});
+				toast("已撤销");
+			})],
+		});
+	});
 	$("apps").replaceChildren(...(rows.length ? rows
-		: [el("div", { className: "empty", textContent: "还没有授权的应用。按上面的步骤添加连接器后会显示在这里。" })]));
+		: [el("div", { className: "empty", textContent: "暂无已授权的应用，按上方步骤添加后会显示在这里。" })]));
 }
 
 function renderUrlKeys() {
+	const checked = selectedDevices($("url-key-form"));
+	showDeviceChoices($("url-key-devices"), $("url-key-toggle"), checked);
+	updateUrlKeyButton();
 	const keys = me.keys.filter((key) => only(key, "connector"));
 	$("url-keys").hidden = keys.length === 0;
-	$("url-keys").replaceChildren(...keys.map((key) => row({
-		title: key.name,
-		meta: "密钥 …" + key.hint + " · " + formatDate(key.createdAt) + "创建",
-		status: key.lastUsedAt ? ago(key.lastUsedAt) + "使用" : "尚未使用",
-		actions: [button("吊销", "danger", async () => {
-			if (!await confirmDialog({
-				title: "吊销「" + key.name + "」？",
-				message: "使用这个地址的客户端将无法再调用。",
-				confirmText: "吊销", danger: true,
-			})) return;
-			await api("me/keys/" + key.id + "/revoke", {});
-			toast("已吊销");
-		})],
-	})));
+	$("url-keys").replaceChildren(...(keys.length ? [
+		el("div", { className: "list-head", textContent: "已创建的地址" }),
+		...keys.map((key) => {
+			const scope = deviceScope(key.deviceIds, "请重新生成地址");
+			return row({
+				title: key.name,
+				badges: [scope.badge],
+				meta: ["密钥 …" + key.hint, formatDate(key.createdAt) + "创建", scope.hint].filter(Boolean).join(" · "),
+				extra: scope.chips,
+				status: key.lastUsedAt ? ago(key.lastUsedAt) + "使用" : "尚未使用",
+				actions: [editAccessButton(key.id, key.name, key.deviceIds), button("删除", "danger", async () => {
+					if (!await confirmDialog({
+						title: "删除「" + key.name + "」？",
+						message: "删除后，使用该地址的客户端将无法再连接。",
+						confirmText: "删除", danger: true,
+					})) return;
+					await api("me/keys/" + key.id + "/revoke", {});
+					toast("已删除");
+				})],
+			});
+		}),
+	] : []));
 	if (keys.length) $("url-keys-section").open = true;
 }
 
@@ -321,11 +451,11 @@ function removeWarning(device, key) {
 		? me.devices.filter((d) => d.id !== device.id && d.keyId === device.keyId).map((d) => d.name)
 		: [];
 	const also = others.length ? "，" + others.join("、") + " 也会断开" : "";
-	if (!key) return "它的密钥已经吊销，只从列表中移除。";
+	if (!key) return "该电脑密钥已失效，仅从列表中移除。";
 	if (isLegacy(key)) {
-		return "它用的是迁移的旧密钥，移除会同时吊销旧密钥" + also + "，使用旧密钥的连接器地址也会失效。";
+		return "移除会同时吊销旧密钥" + also + "。";
 	}
-	return "这台电脑会立即断开，它的密钥同时作废" + also + "。以后要再用，重新添加即可。";
+	return "移除后这台电脑会立即断开" + also + "，如需再用重新添加即可。";
 }
 
 function renderDevices() {
@@ -377,12 +507,12 @@ function renderDevices() {
 		rows.push(row({
 			lead: el("span", { className: "dot wait" }),
 			title: key.name,
-			badges: [badge("等待首次连接")],
-			meta: formatTime(key.createdAt) + " 生成登录命令 · 密钥 …" + key.hint,
+			badges: [badge("等待连接")],
+			meta: formatTime(key.createdAt) + " 创建 · 密钥 …" + key.hint,
 			actions: [button("取消", "", async () => {
 				if (!await confirmDialog({
 					title: "取消添加「" + key.name + "」？",
-					message: "之前生成的登录命令会作废。",
+					message: "已生成的登录命令将会失效。",
 					confirmText: "取消添加", cancelText: "保留", danger: true,
 				})) return;
 				await api("me/keys/" + key.id + "/revoke", {});
@@ -390,7 +520,7 @@ function renderDevices() {
 		}));
 	}
 	$("devices").replaceChildren(...(rows.length ? rows
-		: [el("div", { className: "empty", textContent: "还没有电脑。点击「添加电脑」，在要使用的电脑上运行生成的命令。" })]));
+		: [el("div", { className: "empty", textContent: "还没有电脑。点击右上角「添加电脑」开始连接。" })]));
 }
 
 function renderLegacy() {
@@ -479,27 +609,44 @@ $("revoke-legacy").onclick = (event) => act(event.currentTarget, async () => {
 	const names = me.devices.filter((d) => legacy.some((key) => key.id === d.keyId)).map((d) => d.name);
 	if (!await confirmDialog({
 		title: "吊销旧密钥？",
-		message: (names.length ? names.join("、") + " 会断开，需要重新添加。" : "") + "使用旧密钥的连接器地址也会失效。",
+		message: names.length ? names.join("、") + " 会断开，需要重新添加。" : "吊销后，这个密钥无法再连接电脑。",
 		confirmText: "吊销", danger: true,
 	})) return;
 	for (const key of legacy) await api("me/keys/" + key.id + "/revoke", {});
 	toast("已吊销旧密钥");
 });
 
-// 带密钥的地址：必须先确认风险
-$("url-key-ack").onchange = (event) => { $("url-key-create").disabled = !event.target.checked; };
+function updateUrlKeyButton() {
+	$("url-key-create").disabled = !$("url-key-ack").checked || selectedDevices($("url-key-form")).length === 0;
+	syncChoiceToggle($("url-key-devices"), $("url-key-toggle"));
+}
+
+bindChoiceToggle($("access-devices"), $("access-toggle"), updateAccessState);
+bindChoiceToggle($("url-key-devices"), $("url-key-toggle"), updateUrlKeyButton);
+
+$("access-form").onchange = updateAccessState;
+$("access-form").onsubmit = (event) => {
+	event.preventDefault();
+	const form = event.currentTarget;
+	const deviceIds = selectedDevices(form);
+	act(event.submitter, async () => {
+		await api("me/connectors/" + form.dataset.connectorId + "/devices", { deviceIds });
+		$("modal-access").close();
+		toast("已保存");
+	});
+};
+
+$("url-key-form").onchange = updateUrlKeyButton;
 $("url-key-form").onsubmit = (event) => {
 	event.preventDefault();
-	if (!$("url-key-ack").checked) return;
+	const deviceIds = selectedDevices(event.currentTarget);
 	act(event.submitter, async () => {
-		const { key, token } = await api("me/keys", { name: $("url-key-name").value, type: "connector" });
-		$("url-key-name").value = "";
-		$("url-key-ack").checked = false;
-		$("url-key-create").disabled = true;
+		const { key, token } = await api("me/keys", { name: $("url-key-name").value, type: "connector", deviceIds });
+		$("url-key-form").reset();
 		$("secret-title").textContent = "已生成「" + key.name + "」的地址";
 		$("secret-body").replaceChildren(copyRow(location.origin + "/" + token + "/mcp"));
 		openModal("modal-secret");
-	});
+	}).finally(updateUrlKeyButton);
 };
 
 // 添加电脑：生成命令后每 3 秒检查一次这台电脑是否已连接
@@ -518,7 +665,7 @@ function setWaiting(device) {
 	$("add-waiting").className = "waiting" + (device ? " done" : "");
 	$("add-waiting").replaceChildren(
 		el("span", { className: "dot " + (device ? "on" : "wait") }),
-		el("span", { textContent: device ? "已连接：" + device.name : "等待这台电脑连接…" }),
+		el("span", { textContent: device ? "已连接：" + device.name : "等待电脑连接…" }),
 	);
 	$("add-done").className = "btn" + (device ? " primary" : "");
 }
@@ -534,7 +681,7 @@ $("add-form").onsubmit = async (event) => {
 			["安装（已安装可跳过）", "npm install -g @zgccrui/pi-bridge"],
 			["登录", "pi-bridge login " + location.origin + " " + token + " --name " + shellQuote(name)],
 			["启动", "pi-bridge start",
-				el("p", { className: "note" }, "需要开机后自动运行时，改用 ", el("code", { textContent: "pi-bridge service install" }))],
+				el("p", { className: "note" }, "如需开机自启，改用 ", el("code", { textContent: "pi-bridge service install" }))],
 		];
 		$("add-steps").replaceChildren(...commands.map(([label, command, note]) =>
 			el("li", {}, el("div", {}, el("span", { className: "label", textContent: label }), copyRow(command, true), note))));

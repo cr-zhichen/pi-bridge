@@ -76,7 +76,12 @@ const routes = {
 			case "devices":
 				return Response.json(await hubOf(env, auth.userId).listDevices());
 			default:
-				return handleMcp(request, env, auth.userId);
+				if (
+					(await hubOf(env, auth.userId).connectorDevices(auth.keyId)) === null
+				) {
+					return jsonError("请在账号页重新生成带密钥的地址。", 403);
+				}
+				return handleMcp(request, env, auth.userId, auth.keyId);
 		}
 	},
 };

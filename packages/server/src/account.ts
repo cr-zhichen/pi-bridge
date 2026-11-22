@@ -1,7 +1,7 @@
 import { ACCOUNT_PAGE } from "./account-page.ts";
 import { handleAuthorize } from "./authorize.ts";
 import { jsonError, notFound, readJson } from "./http.ts";
-import { listApps, oauthOf } from "./oauth.ts";
+import { listApps, listGrants, revokeApp } from "./oauth.ts";
 import { htmlResponse } from "./page.ts";
 import {
 	hashPassword,
@@ -10,7 +10,7 @@ import {
 	verifyDummy,
 	verifyPassword,
 } from "./password.ts";
-import { normalizeUsername, type Scope, SESSION_TTL_MS } from "./registry.ts";
+import { normalizeUsername, SESSION_TTL_MS } from "./registry.ts";
 import {
 	currentSession,
 	isSameOrigin,
@@ -41,8 +41,9 @@ export const ACCOUNT_ROUTES = new Set([
  * - POST /api/logout
  * - GET  /api/me                      当前用户、电脑、密钥和已授权的应用
  * - POST /api/me/password             { current, next }
- * - POST /api/me/keys                 { name, type: "device" | "connector" }，返回只显示一次的密钥
+ * - POST /api/me/keys                 创建设备密钥或带密钥的连接器地址
  * - POST /api/me/keys/<id>/revoke
+ * - POST /api/me/connectors/<id>/devices  { deviceIds }，修改允许访问的电脑
  * - POST /api/me/devices/<id>/remove  移除电脑并吊销它使用的密钥
  * - POST /api/me/devices/<id>/delegation  { enabled }，设置是否允许委派任务给 Pi
  * - POST /api/me/apps/<id>/revoke     撤销 OAuth 授权
@@ -119,17 +120,24 @@ export async function handleAccount(
 		return jsonError("请先登录", 401);
 	}
 	const { user } = session;
+	const hub = hubOf(env, user.id);
 
 	if (path === "me" && request.method === "GET") {
 		if (user.mustChangePassword) {
 			return Response.json({ user, keys: [], devices: [], apps: [] });
 		}
-		const [keys, devices, apps] = await Promise.all([
+		const [keys, devices, access] = await Promise.all([
 			registry.listKeys(user.id),
-			hubOf(env, user.id).listDevices(),
-			listApps(env, user.id),
+			hub.listDevices(),
+			hub.listConnectorAccess(),
 		]);
-		return Response.json({ user, keys, devices, apps });
+		const apps = await listApps(env, user.id, access);
+		return Response.json({
+			user,
+			keys: keys.map((key) => ({ ...key, deviceIds: access[key.id] ?? null })),
+			devices,
+			apps,
+		});
 	}
 	if (path === "me/password" && request.method === "POST") {
 		return changePassword(request, registry, session);
@@ -150,9 +158,12 @@ export async function handleAccount(
 		if (body.type !== "device" && body.type !== "connector") {
 			return jsonError("密钥类型无效");
 		}
-		const result = await registry.createKey(user.id, name, [
-			body.type satisfies Scope,
-		]);
+		const result = await registry.createKey(
+			user.id,
+			name,
+			body.type,
+			body.deviceIds,
+		);
 		return result.ok
 			? Response.json({ key: result.key, token: result.token })
 			: jsonError(result.error);
@@ -172,16 +183,23 @@ export async function handleAccount(
 		const found = await registry.revokeKey(user.id, id);
 		return found ? Response.json({}) : jsonError("密钥不存在", 404);
 	}
+	if (kind === "connectors" && action === "devices") {
+		const { deviceIds } = await readJson(request);
+		const result = await hub.updateConnectorDevices(id, deviceIds);
+		if (!result) {
+			return jsonError("连接器已失效，请重新连接。", 404);
+		}
+		return result.ok ? Response.json({}) : jsonError(result.error);
+	}
 	if (kind === "devices" && action === "delegation") {
 		const { enabled } = await readJson(request);
 		if (typeof enabled !== "boolean") {
 			return jsonError("请指定是否允许委派任务给 Pi");
 		}
-		const found = await hubOf(env, user.id).setDelegationEnabled(id, enabled);
+		const found = await hub.setDelegationEnabled(id, enabled);
 		return found ? Response.json({}) : jsonError("电脑不存在", 404);
 	}
 	if (kind === "devices" && action === "remove") {
-		const hub = hubOf(env, user.id);
 		const device = (await hub.listDevices()).find((d) => d.id === id);
 		if (!device) {
 			return jsonError("电脑不存在", 404);
@@ -193,7 +211,13 @@ export async function handleAccount(
 		return Response.json({});
 	}
 	if (kind === "apps" && action === "revoke") {
-		await oauthOf(env).revokeGrant(id, user.id);
+		const grant = (await listGrants(env, user.id)).find(
+			(item) => item.id === id,
+		);
+		if (!grant) {
+			return jsonError("授权已失效，请重新连接。", 404);
+		}
+		await revokeApp(env, user.id, grant);
 		return Response.json({});
 	}
 	return notFound();

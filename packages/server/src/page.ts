@@ -73,6 +73,7 @@ export const PAGE_STYLE = `
 	.field + .field { margin-top: 12px; }
 	.inline-form { display: flex; gap: 8px; flex-wrap: wrap; }
 	.inline-form .input { flex: 1; min-width: 180px; }
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 	.tabs { display: flex; gap: 4px; margin: 22px 0 14px; border-bottom: 1px solid var(--border); }
 	.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; margin-bottom: -1px; color: var(--muted);
@@ -92,6 +93,12 @@ export const PAGE_STYLE = `
 	.row-main { flex: 1; min-width: 0; }
 	.row-title { font-weight: 500; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; overflow-wrap: anywhere; }
 	.row-meta { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+	.row-devices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+	.device-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 8px; border-radius: 6px;
+		background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-size: 12px; font-weight: 500; line-height: 1.45; }
+	.device-chip > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.device-chip .dot { width: 6px; height: 6px; }
+	.device-chip .dot.on { box-shadow: 0 0 0 2px var(--ok-soft); }
 	.row-status { font-size: 12px; color: var(--muted); white-space: nowrap; text-align: right; }
 	.row-status.on { color: var(--ok); }
 	.row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
@@ -128,8 +135,44 @@ export const PAGE_STYLE = `
 	.risk { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px;
 		background: color-mix(in srgb, var(--danger) 6%, var(--surface)); border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--border)); }
 	.risk strong { color: var(--danger); }
-	.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); cursor: pointer; }
-	.check input { margin-top: 3px; accent-color: var(--accent); }
+	.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
+	.check:hover { color: var(--text); }
+	.check input[type="checkbox"], .choice-item input[type="checkbox"] { appearance: none; -webkit-appearance: none; flex: none;
+		width: 16px; height: 16px; margin: 0; border-radius: 4px; border: 1.5px solid var(--border-strong); background: var(--surface);
+		display: grid; place-items: center; cursor: pointer; transition: background-color .14s ease, border-color .14s ease; }
+	.check input[type="checkbox"]::after, .choice-item input[type="checkbox"]::after { content: ""; width: 4.5px; height: 8px;
+		border: solid var(--accent-text); border-width: 0 1.8px 1.8px 0; transform: translateY(-1px) rotate(45deg) scale(.7);
+		opacity: 0; transition: opacity .12s ease, transform .12s ease; }
+	.check:hover input[type="checkbox"]:not(:checked), .choice-item:hover input[type="checkbox"]:not(:checked) { border-color: var(--muted); }
+	.check input[type="checkbox"]:checked, .choice-item input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+	.check input[type="checkbox"]:checked::after, .choice-item input[type="checkbox"]:checked::after { opacity: 1; transform: translateY(-1px) rotate(45deg) scale(1); }
+
+	.device-choice { min-width: 0; border: 0; margin: 0; padding: 0; }
+	.choice-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+	.choice-head .label { margin: 0; }
+	.choice-head .link { font-size: 12px; }
+	.choice-list { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+		overflow: hidden; max-height: 240px; overflow-y: auto; }
+	.choice-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; font-size: 13.5px; color: var(--text);
+		cursor: pointer; user-select: none; transition: background-color .14s ease; }
+	.choice-item + .choice-item { border-top: 1px solid var(--border); }
+	.choice-item:hover { background: var(--surface-2); }
+	.choice-item:has(input:checked) { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+	@media (prefers-color-scheme: dark) {
+		.choice-item:has(input:checked) { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+	}
+	.choice-item:has(input:checked):hover { background: color-mix(in srgb, var(--accent) 6%, var(--surface-2)); }
+	.choice-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+	.choice-name { font-weight: 500; overflow-wrap: anywhere; }
+	.choice-platform { font-size: 12px; color: var(--muted); white-space: nowrap; }
+	.choice-status { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+	.choice-status.on { color: var(--ok); }
+	.choice-status .dot { width: 6px; height: 6px; }
+	.choice-status .dot.on { box-shadow: 0 0 0 2.5px var(--ok-soft); }
+	.choice-empty { padding: 16px 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+		background: var(--surface-2); text-align: center; font-size: 13px; color: var(--muted); }
+	.choice-empty a { color: var(--text); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+	.choice-empty a:hover { opacity: .8; }
 
 	dialog.modal { width: min(540px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; overflow: auto; color: var(--text);
 		background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 24px 64px rgb(0 0 0 / .2); }
@@ -155,6 +198,7 @@ export const PAGE_STYLE = `
 	/* 登录、授权这类单页：不套卡片，品牌和表单排成一列放在页面中间，项目链接放在页面底部 */
 	.auth-page { min-height: 100vh; min-height: 100svh; display: grid; grid-template-rows: 1fr auto; }
 	.auth { width: 100%; max-width: 408px; margin: 0 auto; padding: 48px 24px 72px; align-self: center; }
+	.auth.consent { max-width: 432px; }
 	.auth .brand { margin-bottom: 40px; }
 	.auth h1 { font-size: 26px; line-height: 1.3; }
 	.auth .lead { margin: 8px 0 32px; }
@@ -171,21 +215,23 @@ export const PAGE_STYLE = `
 	.context { display: flex; gap: 8px; align-items: center; margin: -16px 0 32px; color: var(--muted); font-size: 13px; }
 	.context svg { flex: none; }
 
-	.perms { list-style: none; margin: 0 0 20px; padding: 0; display: grid; gap: 10px; }
+	.perms { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 8px; font-size: 13px; color: var(--muted); }
 	.perms li { display: flex; gap: 10px; align-items: flex-start; }
-	.perms li::before { content: "✓"; flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
-		font-size: 12px; font-weight: 700; background: var(--surface-2); border: 1px solid var(--border); margin-top: 1px; }
-	.who { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border);
-		border-radius: var(--radius-sm); margin-bottom: 20px; font-size: 13px; }
-	.who form { margin: 0; }
+	.perms li::before { content: "✓"; flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+		font-size: 11px; font-weight: 700; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); margin-top: 1px; }
+	.who { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--border);
+		border-radius: var(--radius-sm); background: var(--surface); margin-bottom: 22px; font-size: 13px; }
+	.who-user { display: flex; align-items: center; gap: 10px; min-width: 0; }
+	.who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+	.who form { margin: 0; flex: none; }
 	.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: inline-grid;
-		place-items: center; font-weight: 600; margin-right: 10px; flex: none; }
+		place-items: center; font-weight: 600; flex: none; }
 	.pair { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 20px; }
 	.pair .icon, .pair .logo { width: 48px; height: 48px; font-size: 20px; border-radius: var(--radius); }
 	.pair .line { width: 40px; border-top: 2px dotted var(--border-strong); }
 	.facts { margin: 8px 0 20px; padding: 0; list-style: none; font-size: 13px; color: var(--muted); display: grid; gap: 4px; text-align: center; }
 	.facts strong { color: var(--text); font-weight: 600; }
-	.buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+	.buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
 	.buttons form { display: contents; }
 	.warn-box { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn-text);
 		border: 1px solid var(--warn-border); font-size: 13px; margin-bottom: 20px; }
@@ -204,7 +250,9 @@ export const PAGE_STYLE = `
 	.toast.error .toast-icon { background: #fff; color: var(--danger); }
 	@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
 	@media (prefers-reduced-motion: reduce) {
-		dialog.modal[open], dialog.modal[open]::backdrop, .toast { animation: none; }
+		dialog.modal[open], dialog.modal[open]::backdrop, .toast,
+		.check input[type="checkbox"], .check input[type="checkbox"]::after,
+		.choice-item, .choice-item input[type="checkbox"], .choice-item input[type="checkbox"]::after { animation: none; transition: none; }
 	}
 
 	@media (max-width: 640px) {
@@ -412,6 +460,16 @@ export function htmlResponse(html: string, init: ResponseInit = {}): Response {
 /** 转义放进 HTML 的文本。 */
 export function escapeHtml(value: string): string {
 	return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
+const PLATFORM_NAMES: Record<string, string> = {
+	darwin: "macOS",
+	linux: "Linux",
+	win32: "Windows",
+};
+
+export function platformName(platform: string): string {
+	return PLATFORM_NAMES[platform] ?? platform;
 }
 
 export const BRAND = `<div class="brand"><span class="logo">π</span>pi-bridge</div>`;
