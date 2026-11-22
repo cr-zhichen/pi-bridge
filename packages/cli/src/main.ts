@@ -187,12 +187,20 @@ async function start(): Promise<void> {
 	}
 	const bridge = new Bridge(config.deviceId, await loadPi(pi));
 	log(`使用 Pi ${pi.version}`);
+	let stopping = false;
 	const stop = async () => {
+		if (stopping) {
+			return;
+		}
+		stopping = true;
 		await bridge.shutdown();
 		process.exit(0);
 	};
 	process.on("SIGINT", stop);
 	process.on("SIGTERM", stop);
+	if (process.platform !== "win32") {
+		process.on("SIGHUP", stop);
+	}
 	connect(config, bridge, stop);
 	void notifyUpdate();
 	setInterval(notifyUpdate, UPDATE_CHECK_INTERVAL_MS);

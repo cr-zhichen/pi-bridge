@@ -2,16 +2,25 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "../../server/src/protocol.ts";
 import { isNewer } from "./update.ts";
 
-/** 本机 Pi 的 SDK，以及它所用的 pi-agent-core。 */
+/** 本机 Pi 的 SDK，以及它所用的模型与工具接口。 */
 export interface PiSdk {
 	sdk: typeof import("@earendil-works/pi-coding-agent");
 	core: typeof import("@earendil-works/pi-agent-core");
+	cliPath: string;
+	ai: {
+		getSupportedThinkingLevels(
+			model: NonNullable<AgentSession["model"]>,
+		): ThinkingLevel[];
+	};
 }
 
 const PACKAGE = "@earendil-works/pi-coding-agent";
 const CORE_PACKAGE = "@earendil-works/pi-agent-core";
+const AI_PACKAGE = "@earendil-works/pi-ai";
 /**
  * 支持的最低 Pi 版本：更早的版本没有内置的 codemode、MCP 扩展。
  * CI 用 mise run test-pi 在这个版本和最新版本上检查，修改时同步改 ci.yml。
@@ -59,20 +68,31 @@ export function piProblem(pi: LocalPi | undefined): string | undefined {
 
 /** 从本机 Pi 的安装目录加载它的 SDK，扩展因此和终端里的 pi 运行在同一版本上。 */
 export async function loadPi(pi: LocalPi): Promise<PiSdk> {
-	// 按 Node 的模块查找规则，从 Pi 的包目录找到它依赖的 pi-agent-core
-	const searchPaths =
-		createRequire(join(pi.dir, "package.json")).resolve.paths(CORE_PACKAGE) ??
-		[];
-	const coreDir = searchPaths
-		.map((dir) => join(dir, CORE_PACKAGE))
-		.find((dir) => readPackage(dir)?.name === CORE_PACKAGE);
-	if (!coreDir) {
-		throw new Error(`Pi 的安装不完整，找不到 ${CORE_PACKAGE}。请重新安装 Pi`);
+	const bin = readPackage(pi.dir)?.bin;
+	const entry = typeof bin === "string" ? bin : bin?.pi;
+	if (!entry) {
+		throw new Error("找不到 Pi 命令行入口，请重新安装 Pi");
 	}
-	return {
-		sdk: (await importPackage(pi.dir)) as PiSdk["sdk"],
-		core: (await importPackage(coreDir)) as PiSdk["core"],
-	};
+	const [sdk, core, ai] = await Promise.all([
+		importPackage(pi.dir) as Promise<PiSdk["sdk"]>,
+		importPackage(findDependency(pi.dir, CORE_PACKAGE)) as Promise<
+			PiSdk["core"]
+		>,
+		importPackage(findDependency(pi.dir, AI_PACKAGE)) as Promise<PiSdk["ai"]>,
+	]);
+	return { sdk, core, ai, cliPath: join(pi.dir, entry) };
+}
+
+function findDependency(piDir: string, name: string): string {
+	const searchPaths =
+		createRequire(join(piDir, "package.json")).resolve.paths(name) ?? [];
+	const dir = searchPaths
+		.map((path) => join(path, name))
+		.find((path) => readPackage(path)?.name === name);
+	if (!dir) {
+		throw new Error(`Pi 的安装不完整，找不到 ${name}。请重新安装 Pi`);
+	}
+	return dir;
 }
 
 function importPackage(dir: string): Promise<unknown> {
@@ -122,6 +142,7 @@ function piAt(dir: string): LocalPi | undefined {
 interface Manifest {
 	name?: string;
 	version: string;
+	bin?: string | { pi?: string };
 	main?: string;
 	exports?: { "."?: { import?: string } };
 }

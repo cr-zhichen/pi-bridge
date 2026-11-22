@@ -17,6 +17,48 @@ export const ACCOUNT_PAGE = `<!doctype html>
 <head>
 ${PAGE_HEAD}
 <title>pi-bridge</title>
+<style>
+	#devices { overflow: visible; }
+	#devices .status-on { color: var(--ok); font-weight: 500; }
+	#devices .row-actions:has(.switch) { align-items: center; gap: 14px; }
+	#devices .row-divider { width: 1px; height: 16px; background: var(--border); flex: none; }
+	.switch { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 32px; font-size: 12px; line-height: 1;
+		color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; transition: color .15s; }
+	.switch:hover { color: var(--text); }
+	.switch:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+	.switch[data-tip]::before, .switch[data-tip]::after { position: absolute; pointer-events: none; z-index: 10; opacity: 0;
+		transform: translateY(3px); transition: opacity .14s ease, transform .14s ease; }
+	.switch[data-tip]::before { content: ""; right: 34px; bottom: calc(100% + 1.5px);
+		border: 5px solid transparent; border-top-color: var(--text); border-bottom: 0; }
+	.switch[data-tip]::after { content: attr(data-tip); right: 0; bottom: calc(100% + 6px);
+		padding: 6px 10px; border-radius: var(--radius-sm); background: var(--text); color: var(--bg);
+		font-size: 12px; line-height: 1.45; font-weight: 400; width: max-content; max-width: min(280px, calc(100vw - 48px));
+		white-space: normal; box-shadow: 0 6px 18px rgb(0 0 0 / .16); }
+	@media (hover: hover) {
+		.switch[data-tip]:hover::before, .switch[data-tip]:hover::after { opacity: 1; transform: translateY(0); transition-delay: .08s; }
+	}
+	.switch[data-tip]:has(input:focus-visible)::before, .switch[data-tip]:has(input:focus-visible)::after {
+		opacity: 1; transform: translateY(0); transition-delay: 0s; }
+	.switch input { appearance: none; -webkit-appearance: none; flex: none; margin: 0; width: 32px; height: 18px; padding: 2px;
+		border: 0; border-radius: 999px; background: var(--border-strong); cursor: pointer;
+		transition: background-color .16s ease, opacity .16s ease; }
+	.switch input::before { content: ""; display: block; width: 14px; height: 14px; border-radius: 50%; background: #fff;
+		box-shadow: 0 1px 2px rgb(0 0 0 / .18); transition: transform .16s ease, background-color .16s ease; }
+	.switch:hover input:not(:disabled):not(:checked) { background: color-mix(in srgb, var(--muted) 55%, var(--border-strong)); }
+	.switch input:checked { background: var(--accent); }
+	.switch:hover input:not(:disabled):checked { opacity: .88; }
+	.switch input:checked::before { transform: translateX(14px); background: var(--accent-text); }
+	.switch input:disabled { cursor: not-allowed; }
+	@media (prefers-reduced-motion: reduce) {
+		.switch, .switch[data-tip]::before, .switch[data-tip]::after, .switch input, .switch input::before { transition: none; }
+	}
+	@media (max-width: 640px) {
+		#devices .row-actions:has(.switch) { flex-basis: 100%; justify-content: space-between; padding-left: 22px; }
+		#devices .row-divider { display: none; }
+		.switch[data-tip]::before { left: 34px; right: auto; }
+		.switch[data-tip]::after { left: 0; right: auto; }
+	}
+</style>
 </head>
 <body>
 
@@ -209,7 +251,9 @@ function row({ lead, title, badges = [], meta, status, statusOn, actions = [] })
 		lead,
 		el("div", { className: "row-main" },
 			el("div", { className: "row-title" }, el("span", { textContent: title }), ...badges.filter(Boolean)),
-			meta ? el("div", { className: "row-meta", textContent: meta }) : null),
+			meta ? (Array.isArray(meta)
+				? el("div", { className: "row-meta" }, ...meta)
+				: el("div", { className: "row-meta", textContent: meta })) : null),
 		status ? el("div", { className: "row-status" + (statusOn ? " on" : ""), textContent: status }) : null,
 		actions.length ? el("div", { className: "row-actions" }, ...actions) : null,
 	);
@@ -288,6 +332,21 @@ function renderDevices() {
 	const keys = new Map(me.keys.map((key) => [key.id, key]));
 	const rows = me.devices.map((device) => {
 		const key = keys.get(device.keyId);
+		const delegation = el("input", { type: "checkbox", checked: device.delegationEnabled });
+		delegation.setAttribute("role", "switch");
+		delegation.onchange = () => act(delegation, async () => {
+			try {
+				await api("me/devices/" + device.id + "/delegation", { enabled: delegation.checked });
+				toast(delegation.checked ? "已开启 Pi 委派" : "已关闭 Pi 委派");
+			} catch (error) {
+				delegation.checked = device.delegationEnabled;
+				throw error;
+			}
+		});
+		const delegationLabel = el("label", { className: "switch" }, el("span", { textContent: "Pi 委派" }), delegation);
+		delegationLabel.dataset.tip = "允许将任务委派给本机 Pi 模型执行";
+		const details = [platformName(device.platform), device.version && "pi-bridge " + device.version,
+			key && (key.hint ? "密钥 …" + key.hint : key.name)].filter(Boolean).join(" · ");
 		return row({
 			lead: el("span", { className: "dot" + (device.online ? " on" : "") }),
 			title: device.name,
@@ -295,11 +354,14 @@ function renderDevices() {
 				key && isLegacy(key) && badge("旧密钥", "warn"),
 				device.keyId && !key && badge("密钥已吊销"),
 			],
-			meta: [platformName(device.platform), device.version && "pi-bridge " + device.version,
-				key && (key.hint ? "密钥 …" + key.hint : key.name)].filter(Boolean).join(" · "),
-			status: device.online ? "在线" : ago(device.lastSeen) + "在线",
-			statusOn: device.online,
-			actions: [button("移除", "", async () => {
+			meta: [
+				el("span", { className: device.online ? "status-on" : "", textContent: device.online ? "在线" : ago(device.lastSeen) + "在线" }),
+				details && " · " + details,
+			],
+			actions: [
+				delegationLabel,
+				el("span", { className: "row-divider" }),
+				button("移除", "", async () => {
 				if (!await confirmDialog({
 					title: "移除「" + device.name + "」？",
 					message: removeWarning(device, key),

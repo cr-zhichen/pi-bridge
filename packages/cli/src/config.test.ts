@@ -9,6 +9,7 @@ const device = (id: string, name: string): DeviceInfo => ({
 	platform: "darwin",
 	version: "0.2.0",
 	online: false,
+	delegationEnabled: false,
 	lastSeen: 0,
 });
 

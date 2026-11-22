@@ -44,6 +44,7 @@ export const ACCOUNT_ROUTES = new Set([
  * - POST /api/me/keys                 { name, type: "device" | "connector" }，返回只显示一次的密钥
  * - POST /api/me/keys/<id>/revoke
  * - POST /api/me/devices/<id>/remove  移除电脑并吊销它使用的密钥
+ * - POST /api/me/devices/<id>/delegation  { enabled }，设置是否允许委派任务给 Pi
  * - POST /api/me/apps/<id>/revoke     撤销 OAuth 授权
  *
  * 登录状态保存在 HttpOnly Cookie 中。写操作只接受同源的 JSON 请求，防止跨站请求。
@@ -170,6 +171,14 @@ export async function handleAccount(
 	if (kind === "keys" && action === "revoke") {
 		const found = await registry.revokeKey(user.id, id);
 		return found ? Response.json({}) : jsonError("密钥不存在", 404);
+	}
+	if (kind === "devices" && action === "delegation") {
+		const { enabled } = await readJson(request);
+		if (typeof enabled !== "boolean") {
+			return jsonError("请指定是否允许委派任务给 Pi");
+		}
+		const found = await hubOf(env, user.id).setDelegationEnabled(id, enabled);
+		return found ? Response.json({}) : jsonError("电脑不存在", 404);
 	}
 	if (kind === "devices" && action === "remove") {
 		const hub = hubOf(env, user.id);

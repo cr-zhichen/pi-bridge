@@ -33,6 +33,7 @@ type DeviceRow = {
 	version: string;
 	last_seen: number;
 	key_id: string | null;
+	delegation_enabled: number;
 };
 
 function keyTag(keyId: string): string {
@@ -55,7 +56,8 @@ export class UserHub extends DurableObject<Env> {
 			name TEXT NOT NULL,
 			platform TEXT NOT NULL,
 			version TEXT NOT NULL,
-			last_seen INTEGER NOT NULL
+			last_seen INTEGER NOT NULL,
+			delegation_enabled INTEGER NOT NULL DEFAULT 0
 		)`);
 		// 设备最近一次连接用的密钥，账号页据此显示每台电脑用的是哪个密钥
 		const columns = this.sql
@@ -63,6 +65,11 @@ export class UserHub extends DurableObject<Env> {
 			.toArray();
 		if (!columns.some((column) => column.name === "key_id")) {
 			this.sql.exec("ALTER TABLE devices ADD COLUMN key_id TEXT");
+		}
+		if (!columns.some((column) => column.name === "delegation_enabled")) {
+			this.sql.exec(
+				"ALTER TABLE devices ADD COLUMN delegation_enabled INTEGER NOT NULL DEFAULT 0",
+			);
 		}
 		// CLI 的心跳由运行时直接回复，不唤醒休眠的实例
 		this.ctx.setWebSocketAutoResponse(
@@ -92,7 +99,6 @@ export class UserHub extends DurableObject<Env> {
 		}
 		const keyId = query.get("key") ?? "";
 		const { 0: client, 1: server } = new WebSocketPair();
-		// 第一个标签是设备 ID；第二个标签用来在吊销密钥时只断开用它连接的电脑
 		this.ctx.acceptWebSocket(server, [id, keyTag(keyId)]);
 		this.sql.exec(
 			`INSERT INTO devices (id, name, platform, version, last_seen, key_id) VALUES (?, ?, ?, ?, ?, ?)
@@ -150,13 +156,30 @@ export class UserHub extends DurableObject<Env> {
 				online: this.socketOf(row.id) !== undefined,
 				lastSeen: row.last_seen,
 				keyId: row.key_id ?? undefined,
+				delegationEnabled: row.delegation_enabled === 1,
 			}));
+	}
+
+	setDelegationEnabled(deviceId: string, enabled: boolean): boolean {
+		const { rowsWritten } = this.sql.exec(
+			"UPDATE devices SET delegation_enabled = ? WHERE id = ?",
+			Number(enabled),
+			deviceId,
+		);
+		return rowsWritten > 0;
 	}
 
 	async openSession(
 		device: string | undefined,
 		cwd: string,
-	): Promise<Result<Ops["open_session"]["result"] & { deviceName: string }>> {
+	): Promise<
+		Result<
+			Ops["open_session"]["result"] & {
+				deviceName: string;
+				delegationEnabled: boolean;
+			}
+		>
+	> {
 		const devices = this.listDevices();
 		const online = devices.filter((d) => d.online);
 		const names = online.map((d) => d.name).join("、");
@@ -186,13 +209,20 @@ export class UserHub extends DurableObject<Env> {
 			cwd,
 		})) as Result<Ops["open_session"]["result"]>;
 		return result.ok
-			? { ok: true, result: { ...result.result, deviceName: target.name } }
+			? {
+					ok: true,
+					result: {
+						...result.result,
+						deviceName: target.name,
+						delegationEnabled: this.delegationEnabled(target.id),
+					},
+				}
 			: result;
 	}
 
 	/**
 	 * 按会话 ID 或任务 ID 的前缀把操作转发到对应设备。
-	 * run 和 call 的任务 ID 由这里生成：连接在等待途中断开时，网页 AI 仍能拿到 job_id 继续查看。
+	 * 新任务的 ID 由这里生成：连接在等待途中断开时，网页 AI 仍能拿到 job_id 继续查看。
 	 */
 	async forward(
 		op: Exclude<OpName, "open_session">,
@@ -203,7 +233,7 @@ export class UserHub extends DurableObject<Env> {
 		if (!deviceId) {
 			return { ok: false, error: `ID 无效：${id}` };
 		}
-		if (op === "run" || op === "call") {
+		if (op === "run" || op === "call" || op === "delegate") {
 			const jobId = `${deviceId}.${randomId(6)}`;
 			return this.request(
 				deviceId,
@@ -213,6 +243,17 @@ export class UserHub extends DurableObject<Env> {
 			);
 		}
 		return this.request(deviceId, op, params);
+	}
+
+	private delegationEnabled(deviceId: string): boolean {
+		return (
+			this.sql
+				.exec<{ delegation_enabled: number }>(
+					"SELECT delegation_enabled FROM devices WHERE id = ?",
+					deviceId,
+				)
+				.toArray()[0]?.delegation_enabled === 1
+		);
 	}
 
 	/** 用户被禁用或所有密钥被吊销时断开所有设备。 */
@@ -267,10 +308,17 @@ export class UserHub extends DurableObject<Env> {
 				};
 			}
 		}
+		const usesDelegation = op === "delegate" || op === "list_models";
+		if (usesDelegation && !this.delegationEnabled(deviceId)) {
+			return {
+				ok: false,
+				error: "这台电脑未开启 Pi 委派。请在账号页的「我的电脑」中开启。",
+			};
+		}
 		const socket = ws;
 		const id = crypto.randomUUID();
 		const remainingMs = REQUEST_TIMEOUT_MS - (Date.now() - startedAt);
-		return new Promise((resolve) => {
+		const result = await new Promise<Result<unknown>>((resolve) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				resolve({ ok: false, error: lostError });
@@ -278,6 +326,15 @@ export class UserHub extends DurableObject<Env> {
 			this.pending.set(id, { ws: socket, resolve, timer, lostError });
 			socket.send(JSON.stringify({ type: "request", id, op, params }));
 		});
+		// 旧 CLI 对未知操作返回成功响应，但没有 result。
+		if (usesDelegation && result.ok && result.result === undefined) {
+			return {
+				ok: false,
+				error:
+					"这台电脑的 pi-bridge 版本不支持此操作。请在电脑上运行 pi-bridge update 后重试。",
+			};
+		}
+		return result;
 	}
 
 	private waitForReconnect(deviceId: string): Promise<WebSocket | undefined> {

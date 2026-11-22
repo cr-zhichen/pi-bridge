@@ -18,6 +18,7 @@ import type {
 } from "../../server/src/protocol.ts";
 import { Bridge } from "../src/bridge.ts";
 import { findPi, loadPi, piProblem } from "../src/pi.ts";
+import { checkDelegation, type Send } from "./pi-delegate-check.ts";
 
 if (process.argv[2] === "--run") {
 	await check();
@@ -92,9 +93,15 @@ export default function (pi) {
 		stdio: "inherit",
 		cwd: home,
 		env: {
-			...process.env,
 			HOME: home,
 			USERPROFILE: home,
+			SystemRoot: process.env.SystemRoot,
+			ComSpec: process.env.ComSpec,
+			TEMP: process.env.TEMP,
+			TMPDIR: process.env.TMPDIR,
+			SHELL: process.env.SHELL,
+			PI_CODING_AGENT_DIR: join(home, ".pi", "agent"),
+			PI_OFFLINE: "1",
 			PATH: [join(prefix, "bin"), prefix, process.env.PATH].join(delimiter),
 		},
 	});
@@ -109,7 +116,10 @@ async function check(): Promise<void> {
 	console.log(`Pi ${pi.version}：${pi.dir}`);
 	const bridge = new Bridge("compat", await loadPi(pi));
 	let n = 0;
-	const send = async <T>(op: Request["op"], params: unknown): Promise<T> => {
+	const send: Send = async <T>(
+		op: Request["op"],
+		params: unknown,
+	): Promise<T> => {
 		const response = await bridge.handle({
 			type: "request",
 			id: String(++n),
@@ -189,6 +199,7 @@ async function check(): Promise<void> {
 		}),
 		"hooked",
 	);
+	await checkDelegation(send, opened, bridge);
 	await bridge.shutdown();
 	const events = (globalThis as { bridgeEvents?: string[] }).bridgeEvents ?? [];
 	for (const event of [
