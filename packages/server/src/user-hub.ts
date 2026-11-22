@@ -14,6 +14,7 @@ import { randomId } from "./stubs.ts";
 
 export type Result<T> = { ok: true; result: T } | { ok: false; error: string };
 
+const RECONNECT_TIMEOUT_MS = 3_000;
 /** 转发的操作都由 CLI 限时返回；超过这个时间说明设备没有响应。 */
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -45,6 +46,7 @@ function keyTag(keyId: string): string {
 export class UserHub extends DurableObject<Env> {
 	sql = this.ctx.storage.sql;
 	pending = new Map<string, Pending>();
+	private reconnectWaiters = new Map<string, Set<(ws: WebSocket) => void>>();
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -103,6 +105,9 @@ export class UserHub extends DurableObject<Env> {
 			Date.now(),
 			keyId,
 		);
+		for (const reconnect of this.reconnectWaiters.get(id) ?? []) {
+			reconnect(server);
+		}
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
@@ -148,18 +153,23 @@ export class UserHub extends DurableObject<Env> {
 			}));
 	}
 
-	/** 在指定设备上打开会话；只有一台设备在线时可以不指定。 */
 	async openSession(
 		device: string | undefined,
 		cwd: string,
 	): Promise<Result<Ops["open_session"]["result"] & { deviceName: string }>> {
-		const online = this.listDevices().filter((d) => d.online);
+		const devices = this.listDevices();
+		const online = devices.filter((d) => d.online);
 		const names = online.map((d) => d.name).join("、");
 		let target: DeviceInfo | undefined;
 		if (device) {
-			target = online.find((d) => d.name === device || d.id === device);
-		} else if (online.length === 1) {
-			target = online[0];
+			target =
+				devices.find((d) => d.id === device) ??
+				devices.find((d) => d.name === device);
+		} else {
+			const candidates = online.length > 0 ? online : devices;
+			if (candidates.length === 1) {
+				target = candidates[0];
+			}
 		}
 		if (!target) {
 			return {
@@ -231,13 +241,14 @@ export class UserHub extends DurableObject<Env> {
 		return rowsWritten > 0;
 	}
 
-	private request(
+	private async request(
 		deviceId: string,
 		op: OpName,
 		params: unknown,
 		lostError = "设备连接中断或没有响应，请稍后重试",
 	): Promise<Result<unknown>> {
-		const ws = this.socketOf(deviceId);
+		const startedAt = Date.now();
+		let ws = this.socketOf(deviceId);
 		if (!ws) {
 			const name = this.sql
 				.exec<{ name: string }>(
@@ -246,21 +257,44 @@ export class UserHub extends DurableObject<Env> {
 				)
 				.toArray()[0]?.name;
 			if (name === undefined) {
-				return Promise.resolve({ ok: false, error: "会话或任务不存在" });
+				return { ok: false, error: "会话或任务不存在" };
 			}
-			return Promise.resolve({
-				ok: false,
-				error: `设备「${name}」当前不在线，请确认电脑上的 pi-bridge 正在运行`,
-			});
+			ws = await this.waitForReconnect(deviceId);
+			if (!ws) {
+				return {
+					ok: false,
+					error: `设备「${name}」不在线，本次操作未发送，请在设备恢复连接后重试`,
+				};
+			}
 		}
+		const socket = ws;
 		const id = crypto.randomUUID();
+		const remainingMs = REQUEST_TIMEOUT_MS - (Date.now() - startedAt);
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				resolve({ ok: false, error: lostError });
-			}, REQUEST_TIMEOUT_MS);
-			this.pending.set(id, { ws, resolve, timer, lostError });
-			ws.send(JSON.stringify({ type: "request", id, op, params }));
+			}, remainingMs);
+			this.pending.set(id, { ws: socket, resolve, timer, lostError });
+			socket.send(JSON.stringify({ type: "request", id, op, params }));
+		});
+	}
+
+	private waitForReconnect(deviceId: string): Promise<WebSocket | undefined> {
+		const waiters =
+			this.reconnectWaiters.get(deviceId) ?? new Set<(ws: WebSocket) => void>();
+		this.reconnectWaiters.set(deviceId, waiters);
+		return new Promise((resolve) => {
+			const finish = (ws?: WebSocket) => {
+				clearTimeout(timer);
+				waiters.delete(finish);
+				if (waiters.size === 0) {
+					this.reconnectWaiters.delete(deviceId);
+				}
+				resolve(ws);
+			};
+			const timer = setTimeout(() => finish(), RECONNECT_TIMEOUT_MS);
+			waiters.add(finish);
 		});
 	}
 

@@ -68,7 +68,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 				device: z
 					.string()
 					.optional()
-					.describe("设备名称；只有一台设备在线时可以省略"),
+					.describe("设备名称。仅登记了一台设备或只有一台设备在线时可以省略。"),
 			}),
 			annotations: { readOnlyHint: true, openWorldHint: false },
 		},
