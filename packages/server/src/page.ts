@@ -148,6 +148,7 @@ export const PAGE_STYLE = `
 	.check input[type="checkbox"]:checked::after, .choice-item input[type="checkbox"]:checked::after { opacity: 1; transform: translateY(-1px) rotate(45deg) scale(1); }
 
 	.device-choice { min-width: 0; border: 0; margin: 0; padding: 0; }
+	.choice-all { min-height: 36px; margin-bottom: 8px; color: var(--text); }
 	.choice-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 	.choice-head .label { margin: 0; }
 	.choice-head .link { font-size: 12px; }

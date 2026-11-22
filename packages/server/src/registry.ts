@@ -140,6 +140,7 @@ export class Registry extends DurableObject<Env> {
 		userId: string,
 		name: string,
 		scope: Scope,
+		accessMode: unknown,
 		deviceIds: unknown,
 	): Promise<Outcome<{ key: KeyInfo; token: string }>> {
 		const count = this.sql
@@ -165,8 +166,9 @@ export class Registry extends DurableObject<Env> {
 		};
 		const tokenHash = await hashToken(token);
 		if (scope === "connector") {
-			const access = await hubOf(this.env, userId).setConnectorDevices(
+			const access = await hubOf(this.env, userId).setConnectorAccess(
 				key.id,
+				accessMode,
 				deviceIds,
 			);
 			if (!access.ok) {
@@ -188,15 +190,19 @@ export class Registry extends DurableObject<Env> {
 
 	/** 吊销后立即失效，用这个密钥连接的电脑会断开。 */
 	async revokeKey(userId: string, keyId: string): Promise<boolean> {
-		const { rowsWritten } = this.sql.exec(
-			"DELETE FROM keys WHERE id = ? AND user_id = ?",
+		const [key] = this.sql
+			.exec<{ scopes: string }>(
+				"DELETE FROM keys WHERE id = ? AND user_id = ? RETURNING scopes",
+				keyId,
+				userId,
+			)
+			.toArray();
+		if (!key) return false;
+		await hubOf(this.env, userId).revokeKey(
 			keyId,
-			userId,
+			parseScopes(key.scopes).includes("connector"),
 		);
-		if (rowsWritten > 0) {
-			await hubOf(this.env, userId).revokeKey(keyId);
-		}
-		return rowsWritten > 0;
+		return true;
 	}
 
 	/** 吊销用户的所有密钥，所有电脑会断开。 */
@@ -205,12 +211,16 @@ export class Registry extends DurableObject<Env> {
 			return false;
 		}
 		const keys = this.sql
-			.exec<{ id: string }>(
-				"DELETE FROM keys WHERE user_id = ? RETURNING id",
+			.exec<{ id: string; scopes: string }>(
+				"DELETE FROM keys WHERE user_id = ? RETURNING id, scopes",
 				userId,
 			)
 			.toArray();
-		await hubOf(this.env, userId).revokeAllKeys(keys.map((key) => key.id));
+		await hubOf(this.env, userId).revokeAllKeys(
+			keys
+				.filter((key) => parseScopes(key.scopes).includes("connector"))
+				.map((key) => key.id),
+		);
 		return true;
 	}
 

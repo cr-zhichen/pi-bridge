@@ -14,6 +14,25 @@ import { randomId } from "./stubs.ts";
 
 export type Result<T> = { ok: true; result: T } | { ok: false; error: string };
 
+export interface DeviceAccess {
+	mode: "all" | "selected";
+	deviceIds: string[];
+}
+
+export const ALL_DEVICES: DeviceAccess = { mode: "all", deviceIds: [] };
+
+type AccessRow = {
+	id: string;
+	mode: DeviceAccess["mode"] | "revoked";
+	device_ids: string;
+};
+
+function toDeviceAccess(row: AccessRow): DeviceAccess | null {
+	return row.mode === "revoked"
+		? null
+		: { mode: row.mode, deviceIds: JSON.parse(row.device_ids) as string[] };
+}
+
 const RECONNECT_TIMEOUT_MS = 3_000;
 /** 转发的操作都由 CLI 限时返回；超过这个时间说明设备没有响应。 */
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -75,8 +94,17 @@ export class UserHub extends DurableObject<Env> {
 		}
 		this.sql.exec(`CREATE TABLE IF NOT EXISTS connector_access (
 			id TEXT PRIMARY KEY,
-			device_ids TEXT NOT NULL
+			device_ids TEXT NOT NULL,
+			mode TEXT NOT NULL DEFAULT 'selected'
 		)`);
+		const accessColumns = this.sql
+			.exec<{ name: string }>("PRAGMA table_info(connector_access)")
+			.toArray();
+		if (!accessColumns.some((column) => column.name === "mode")) {
+			this.sql.exec(
+				"ALTER TABLE connector_access ADD COLUMN mode TEXT NOT NULL DEFAULT 'selected'",
+			);
+		}
 		// CLI 的心跳由运行时直接回复，不唤醒休眠的实例
 		this.ctx.setWebSocketAutoResponse(
 			new WebSocketRequestResponsePair("ping", "pong"),
@@ -176,31 +204,39 @@ export class UserHub extends DurableObject<Env> {
 			}));
 	}
 
-	listConnectorAccess(): Record<string, string[]> {
+	listConnectorAccess(): Record<string, DeviceAccess | null> {
 		return Object.fromEntries(
 			this.sql
-				.exec<{ id: string; device_ids: string }>(
-					"SELECT id, device_ids FROM connector_access",
-				)
+				.exec<AccessRow>("SELECT id, mode, device_ids FROM connector_access")
 				.toArray()
-				.map(({ id, device_ids }) => [id, JSON.parse(device_ids) as string[]]),
+				.map((row) => [row.id, toDeviceAccess(row)]),
 		);
 	}
 
-	connectorDevices(connectorId: string): string[] | null {
-		const row = this.sql
-			.exec<{ device_ids: string }>(
-				"SELECT device_ids FROM connector_access WHERE id = ?",
-				connectorId,
-			)
-			.toArray()[0];
-		return row ? (JSON.parse(row.device_ids) as string[]) : null;
+	/** 只有凭证已验证且早于设备范围功能的连接器可以初始化为全部电脑。 */
+	connectorAccess(
+		connectorId: string,
+		restoreLegacy = false,
+	): DeviceAccess | null {
+		const row = this.connectorAccessRow(connectorId);
+		if (row) return toDeviceAccess(row);
+		if (!restoreLegacy) return null;
+		this.saveConnectorAccess(connectorId, "all", []);
+		return ALL_DEVICES;
 	}
 
-	setConnectorDevices(
+	setConnectorAccess(
 		connectorId: string,
+		mode: unknown,
 		selection: unknown,
 	): { ok: true } | { ok: false; error: string } {
+		if (mode === "all") {
+			this.saveConnectorAccess(connectorId, mode, []);
+			return { ok: true };
+		}
+		if (mode !== "selected") {
+			return { ok: false, error: "请选择可访问的电脑范围。" };
+		}
 		if (!Array.isArray(selection) || selection.length === 0) {
 			return { ok: false, error: "请至少选择一台电脑。" };
 		}
@@ -215,23 +251,60 @@ export class UserHub extends DurableObject<Env> {
 		) {
 			return { ok: false, error: "所选电脑已无法使用，请重新选择。" };
 		}
-		this.sql.exec(
-			`INSERT INTO connector_access (id, device_ids) VALUES (?, ?)
-			ON CONFLICT (id) DO UPDATE SET device_ids = excluded.device_ids`,
-			connectorId,
-			JSON.stringify([...new Set(selection)]),
-		);
+		this.saveConnectorAccess(connectorId, mode, [...new Set(selection)]);
 		return { ok: true };
 	}
 
-	updateConnectorDevices(connectorId: string, selection: unknown) {
-		return this.connectorDevices(connectorId) === null
+	updateConnectorAccess(
+		connectorId: string,
+		mode: unknown,
+		selection: unknown,
+		restoreLegacy: boolean,
+	) {
+		const row = this.connectorAccessRow(connectorId);
+		return (row ? row.mode === "revoked" : !restoreLegacy)
 			? null
-			: this.setConnectorDevices(connectorId, selection);
+			: this.setConnectorAccess(connectorId, mode, selection);
+	}
+
+	private connectorAccessRow(connectorId: string): AccessRow | undefined {
+		return this.sql
+			.exec<AccessRow>(
+				"SELECT id, mode, device_ids FROM connector_access WHERE id = ?",
+				connectorId,
+			)
+			.toArray()[0];
 	}
 
 	removeConnectorAccess(connectorId: string): void {
 		this.sql.exec("DELETE FROM connector_access WHERE id = ?", connectorId);
+	}
+
+	revokeConnectorAccess(connectorId: string): void {
+		// 保留撤销状态，防止仍在处理中的旧凭证重新初始化访问范围。
+		this.saveConnectorAccess(connectorId, "revoked", []);
+	}
+
+	private saveConnectorAccess(
+		connectorId: string,
+		mode: AccessRow["mode"],
+		deviceIds: string[],
+	): void {
+		this.sql.exec(
+			`INSERT INTO connector_access (id, mode, device_ids) VALUES (?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET mode = excluded.mode, device_ids = excluded.device_ids`,
+			connectorId,
+			mode,
+			JSON.stringify(deviceIds),
+		);
+	}
+
+	private canAccessDevice(connectorId: string, deviceId: string): boolean {
+		const access = this.connectorAccess(connectorId);
+		return (
+			access !== null &&
+			(access.mode === "all" || access.deviceIds.includes(deviceId))
+		);
 	}
 
 	setDelegationEnabled(deviceId: string, enabled: boolean): boolean {
@@ -255,12 +328,17 @@ export class UserHub extends DurableObject<Env> {
 			}
 		>
 	> {
-		const allowed = this.connectorDevices(connectorId);
-		const devices = this.listDevices().filter((d) => allowed?.includes(d.id));
+		const access = this.connectorAccess(connectorId);
+		const devices = this.listDevices().filter(
+			(d) => access?.mode === "all" || access?.deviceIds.includes(d.id),
+		);
 		if (devices.length === 0) {
 			return {
 				ok: false,
-				error: "此连接器没有可访问的电脑，请在账号页选择电脑。",
+				error:
+					access?.mode === "all"
+						? "账号下还没有电脑，请在账号页添加电脑。"
+						: "此连接器没有可访问的电脑，请在账号页选择电脑。",
 			};
 		}
 		const online = devices.filter((d) => d.online);
@@ -348,8 +426,8 @@ export class UserHub extends DurableObject<Env> {
 	}
 
 	/** 密钥被吊销时只断开用它连接的设备。 */
-	revokeKey(keyId: string): void {
-		this.removeConnectorAccess(keyId);
+	revokeKey(keyId: string, isConnector: boolean): void {
+		if (isConnector) this.revokeConnectorAccess(keyId);
 		for (const ws of this.ctx.getWebSockets(keyTag(keyId))) {
 			ws.close(CLOSE_REVOKED, "revoked");
 		}
@@ -357,7 +435,9 @@ export class UserHub extends DurableObject<Env> {
 
 	revokeAllKeys(keyIds: string[]): void {
 		this.sql.exec(
-			"DELETE FROM connector_access WHERE id IN (SELECT value FROM json_each(?))",
+			`INSERT INTO connector_access (id, mode, device_ids)
+			SELECT value, 'revoked', '[]' FROM json_each(?) WHERE true
+			ON CONFLICT (id) DO UPDATE SET mode = excluded.mode, device_ids = excluded.device_ids`,
 			JSON.stringify(keyIds),
 		);
 		this.revoke();
@@ -395,7 +475,7 @@ export class UserHub extends DurableObject<Env> {
 		params: unknown,
 		lostError = "设备连接中断或没有响应，请稍后重试",
 	): Promise<Result<unknown>> {
-		if (!this.connectorDevices(connectorId)?.includes(deviceId)) {
+		if (!this.canAccessDevice(connectorId, deviceId)) {
 			return { ok: false, error: DEVICE_NOT_ALLOWED };
 		}
 		const startedAt = Date.now();
@@ -417,7 +497,7 @@ export class UserHub extends DurableObject<Env> {
 					error: `设备「${name}」不在线，本次操作未发送，请在设备恢复连接后重试`,
 				};
 			}
-			if (!this.connectorDevices(connectorId)?.includes(deviceId)) {
+			if (!this.canAccessDevice(connectorId, deviceId)) {
 				return { ok: false, error: DEVICE_NOT_ALLOWED };
 			}
 		}

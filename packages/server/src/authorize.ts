@@ -66,8 +66,9 @@ export async function handleAuthorize(
 			const details = await oauth.describeConsent(approved.request);
 			const connectorId = crypto.randomUUID();
 			const hub = hubOf(env, session.user.id);
-			const access = await hub.setConnectorDevices(
+			const access = await hub.setConnectorAccess(
 				connectorId,
+				form.get("allDevices") === "on" ? "all" : "selected",
 				form.getAll("deviceId"),
 			);
 			if (!access.ok) {
@@ -179,24 +180,27 @@ ${PAGE_HEAD}
 		<input type="hidden" name="handle" value="${escapeHtml(handle)}">
 		<fieldset class="device-choice">
 			<legend class="sr-only">允许访问的电脑</legend>
-			<div class="choice-head">
-				<span class="label">允许访问的电脑</span>
-				${devices.length > 1 ? '<button type="button" class="link" id="toggle-all">全选</button>' : ""}
+			<label class="check choice-all"><input type="checkbox" name="allDevices"><span>允许访问全部电脑（包括以后添加的电脑）</span></label>
+			<div id="selected-devices">
+				<div class="choice-head">
+					<span class="label">选择电脑</span>
+					${devices.length > 1 ? '<button type="button" class="link" id="toggle-all">全选当前电脑</button>' : ""}
+				</div>
+				${
+					devices.length
+						? `<div class="choice-list">${devices
+								.map(
+									(device) =>
+										`<label class="choice-item"><input type="checkbox" name="deviceId" value="${escapeHtml(device.id)}"><span class="choice-main"><span class="choice-name">${escapeHtml(device.name)}</span>${device.platform ? `<span class="choice-platform">${escapeHtml(platformName(device.platform))}</span>` : ""}</span><span class="choice-status${device.online ? " on" : ""}"><span class="dot${device.online ? " on" : ""}"></span>${device.online ? "在线" : "离线"}</span></label>`,
+								)
+								.join("")}</div>`
+						: '<div class="choice-empty">还没有电脑，请先前往 <a href="/account" target="_blank" rel="noopener">账号页</a> 添加后再刷新。</div>'
+				}
 			</div>
-			${
-				devices.length
-					? `<div class="choice-list">${devices
-							.map(
-								(device) =>
-									`<label class="choice-item"><input type="checkbox" name="deviceId" value="${escapeHtml(device.id)}"><span class="choice-main"><span class="choice-name">${escapeHtml(device.name)}</span>${device.platform ? `<span class="choice-platform">${escapeHtml(platformName(device.platform))}</span>` : ""}</span><span class="choice-status${device.online ? " on" : ""}"><span class="dot${device.online ? " on" : ""}"></span>${device.online ? "在线" : "离线"}</span></label>`,
-							)
-							.join("")}</div>`
-					: '<div class="choice-empty">还没有电脑，请先前往 <a href="/account" target="_blank" rel="noopener">账号页</a> 添加后再刷新。</div>'
-			}
 		</fieldset>
 		<div class="buttons">
 			<button class="btn wide" name="decision" value="deny">拒绝</button>
-			<button class="btn primary wide" name="decision" value="approve" ${devices.length ? "" : "disabled"}>允许访问</button>
+			<button class="btn primary wide" name="decision" value="approve">允许访问</button>
 		</div>
 	</form>
 	<p class="note" style="text-align:center">可在账号页修改或撤销授权。</p>
@@ -205,12 +209,15 @@ ${PAGE_HEAD}
 <script>
 	const form = document.getElementById("consent-form");
 	const allow = form.querySelector('[value="approve"]');
+	const all = form.elements.allDevices;
+	const selection = document.getElementById("selected-devices");
 	const inputs = Array.from(form.querySelectorAll('[name="deviceId"]'));
 	const toggle = document.getElementById("toggle-all");
 	function updateApproval() {
 		const checked = inputs.filter((input) => input.checked).length;
-		allow.disabled = checked === 0;
-		if (toggle) toggle.textContent = checked === inputs.length ? "清空" : "全选";
+		selection.hidden = all.checked;
+		allow.disabled = !all.checked && checked === 0;
+		if (toggle) toggle.textContent = checked === inputs.length ? "清空" : "全选当前电脑";
 	}
 	if (toggle) {
 		toggle.addEventListener("click", () => {

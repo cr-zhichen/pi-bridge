@@ -6,6 +6,7 @@ import {
 } from "@cloudflare/workers-oauth-provider";
 import { handleMcp } from "./mcp.ts";
 import { hubOf, registryOf } from "./stubs.ts";
+import { ALL_DEVICES, type DeviceAccess } from "./user-hub.ts";
 
 /**
  * 网页版连接器的 OAuth：
@@ -20,7 +21,8 @@ import { hubOf, registryOf } from "./stubs.ts";
 /** completeAuthorization 写入令牌的数据，调用 /mcp 时取回。 */
 export interface AuthProps {
 	userId: string;
-	connectorId: string;
+	/** 按电脑授权上线前签发的令牌只有 userId。 */
+	connectorId?: string;
 }
 
 /** 写在授权记录上的元数据，账号页的「已授权的应用」用它显示。 */
@@ -34,8 +36,8 @@ export interface GrantMetadata {
 
 export interface AppInfo extends Omit<GrantMetadata, "connectorId"> {
 	id: string;
-	connectorId: string | null;
-	deviceIds: string[] | null;
+	connectorId: string;
+	deviceAccess: DeviceAccess | null;
 	clientId: string;
 	createdAt: number;
 	lastUsedAt: number | null;
@@ -43,6 +45,15 @@ export interface AppInfo extends Omit<GrantMetadata, "connectorId"> {
 
 export function oauthOf(env: Env): OAuthHelpers {
 	return (env as Env & { OAUTH_PROVIDER: OAuthHelpers }).OAUTH_PROVIDER;
+}
+
+function legacyConnectorId(grantId: string): string {
+	return `oauth:${grantId}`;
+}
+
+export function isLegacyApp(grant: GrantSummary, connectorId: string): boolean {
+	const metadata = grant.metadata as Partial<GrantMetadata> | undefined;
+	return !metadata?.connectorId && legacyConnectorId(grant.id) === connectorId;
 }
 
 /** 用户的全部授权。 */
@@ -64,7 +75,7 @@ export async function listGrants(
 export async function listApps(
 	env: Env,
 	userId: string,
-	access: Record<string, string[]>,
+	access: Record<string, DeviceAccess | null>,
 ): Promise<AppInfo[]> {
 	const [grants, usage] = await Promise.all([
 		listGrants(env, userId),
@@ -73,13 +84,14 @@ export async function listApps(
 	return grants
 		.map((grant) => {
 			const metadata = (grant.metadata ?? {}) as Partial<GrantMetadata>;
-			const deviceIds = metadata.connectorId
-				? access[metadata.connectorId]
-				: undefined;
+			const connectorId = metadata.connectorId ?? legacyConnectorId(grant.id);
 			return {
 				id: grant.id,
-				connectorId: deviceIds ? (metadata.connectorId ?? null) : null,
-				deviceIds: deviceIds ?? null,
+				connectorId,
+				deviceAccess:
+					access[connectorId] === undefined && !metadata.connectorId
+						? ALL_DEVICES
+						: (access[connectorId] ?? null),
 				clientId: grant.clientId,
 				clientName: metadata.clientName || grant.clientId,
 				clientDomain: metadata.clientDomain,
@@ -105,9 +117,9 @@ export async function revokeApp(
 	grant: GrantSummary,
 ): Promise<void> {
 	const metadata = grant.metadata as Partial<GrantMetadata> | undefined;
-	if (metadata?.connectorId) {
-		await hubOf(env, userId).removeConnectorAccess(metadata.connectorId);
-	}
+	await hubOf(env, userId).revokeConnectorAccess(
+		metadata?.connectorId ?? legacyConnectorId(grant.id),
+	);
 	await oauthOf(env).revokeGrant(grant.id, userId);
 }
 
@@ -115,16 +127,6 @@ const apiHandler: ExportedHandler<Env> &
 	Pick<Required<ExportedHandler<Env>>, "fetch"> = {
 	async fetch(request, env, ctx) {
 		const { props, auth } = ctx as OAuthResourceContext<AuthProps>;
-		if (
-			!props.connectorId ||
-			(await hubOf(env, props.userId).connectorDevices(props.connectorId)) ===
-				null
-		) {
-			return new Response("请在客户端重新连接并选择允许访问的电脑。", {
-				status: 401,
-				headers: { "WWW-Authenticate": 'Bearer error="invalid_token"' },
-			});
-		}
 		const allowed = await registryOf(env).authorizeApp(
 			props.userId,
 			auth.clientId ?? "",
@@ -132,7 +134,24 @@ const apiHandler: ExportedHandler<Env> &
 		if (!allowed) {
 			return new Response("用户已被禁用", { status: 403 });
 		}
-		return handleMcp(request, env, props.userId, props.connectorId);
+		let connectorId = props.connectorId;
+		if (!connectorId) {
+			const legacy = await oauthOf(env).unwrapToken(auth.token);
+			if (legacy) connectorId = legacyConnectorId(legacy.grantId);
+		}
+		if (
+			!connectorId ||
+			(await hubOf(env, props.userId).connectorAccess(
+				connectorId,
+				!props.connectorId,
+			)) === null
+		) {
+			return new Response("请在客户端重新连接并选择允许访问的电脑。", {
+				status: 401,
+				headers: { "WWW-Authenticate": 'Bearer error="invalid_token"' },
+			});
+		}
+		return handleMcp(request, env, props.userId, connectorId);
 	},
 };
 
