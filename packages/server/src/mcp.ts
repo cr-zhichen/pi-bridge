@@ -32,7 +32,7 @@ const INSTRUCTIONS = `pi-bridge 让你在用户的电脑上读写文件、运行
 3. open_session 还会列出电脑上可用的 Skills。任务符合某个 Skill 的描述时，先用 call 调用 read 读取它的 SKILL.md，再按说明操作。
 4. 运行命令用 run；读取、搜索、修改文件用 call 调用 read、grep、find、ls、edit、write。
 5. list_capabilities 列出扩展和 MCP 服务器提供的其他工具。
-6. 用户允许当前任务使用 Pi 时，可以用 delegate 委派；需要基于上次委派继续追问时传入 delegation_id。run、call 和 delegate 最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id，用 wait 获取后续输出或结果，用 cancel 停止。`;
+6. 用户允许当前任务使用 Pi 时，可以用 delegate 委派；找回以前的委派用 list_delegations，续接时把相应的 delegation_id 传给 delegate。run、call 和 delegate 最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id，用 wait 获取后续输出或结果，用 cancel 停止。`;
 
 export function handleMcp(
 	request: Request,
@@ -228,6 +228,40 @@ function buildServer(
 							`- ${id}（${name}，思考等级：${thinkingLevels.join("、")}）`,
 					)
 					.join("\n") || "没有可选的 Pi 模型。",
+			);
+		},
+	);
+
+	server.registerTool(
+		"list_delegations",
+		{
+			title: "查找 Pi 委派",
+			description:
+				"列出当前电脑、当前目录的近期 Pi 委派，按最近更新时间排序，包含任务开头和可用于续接的 delegation_id。用户想继续之前的委派、当前对话中又没有委派 ID 时使用。无法确定要续接哪一条时，先请用户选择。",
+			inputSchema: z.object({
+				session_id: sessionId,
+				limit: z.number().int().min(1).max(20).default(5),
+			}),
+			annotations: { readOnlyHint: true, openWorldHint: false },
+		},
+		async ({ session_id, limit }) => {
+			const result = await forward("list_delegations", {
+				sessionId: session_id,
+				limit,
+			});
+			if (!result.ok) {
+				return errorResult(result.error);
+			}
+			if (!result.result.length) {
+				return textResult("当前目录没有保存的 Pi 委派。");
+			}
+			return textResult(
+				result.result
+					.map(
+						({ delegationId, updatedAt, preview }) =>
+							`- ${new Date(updatedAt).toISOString()} · ${preview}\n  delegation_id: ${delegationId}`,
+					)
+					.join("\n"),
 			);
 		},
 	);

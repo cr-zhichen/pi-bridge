@@ -120,6 +120,12 @@ export interface Capabilities {
 	skills: SkillSummary[];
 }
 
+export interface DelegationSummary {
+	delegationId: string;
+	updatedAt: number;
+	preview: string;
+}
+
 /** Worker 转发给 CLI 的操作及其参数和结果。 */
 export interface Ops {
 	open_session: {
@@ -151,6 +157,10 @@ export interface Ops {
 	list_models: {
 		params: { sessionId: string };
 		result: ModelSummary[];
+	};
+	list_delegations: {
+		params: { sessionId: string; limit: number };
+		result: DelegationSummary[];
 	};
 	delegate: {
 		params: {

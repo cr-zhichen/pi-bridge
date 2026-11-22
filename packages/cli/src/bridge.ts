@@ -4,6 +4,7 @@ import {
 	mkdirSync,
 	openSync,
 	readdirSync,
+	realpathSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -33,6 +34,7 @@ import type { PiSdk } from "./pi.ts";
 import {
 	type DelegationOptions,
 	delegationHistory,
+	listDelegations,
 	runPiDelegation,
 	saveDelegationSelection,
 } from "./pi-delegation.ts";
@@ -45,6 +47,7 @@ const JOB_LOG_TTL_MS = 7 * 24 * 60 * 60_000;
 interface Session {
 	id: string;
 	cwd: string;
+	delegationCwd: string;
 	pi: AgentSession;
 	contextFiles: string[];
 	lastUsed: number;
@@ -146,6 +149,12 @@ export class Bridge {
 				return this.call(request.params);
 			case "list_models":
 				return this.listModels(request.params.sessionId);
+			case "list_delegations":
+				return listDelegations(
+					this.pi.sdk,
+					this.session(request.params.sessionId).delegationCwd,
+					request.params.limit,
+				);
 			case "delegate":
 				return this.delegate(request.params);
 			case "wait":
@@ -159,7 +168,10 @@ export class Bridge {
 		input: string,
 	): Promise<Ops["open_session"]["result"]> {
 		const cwd = resolveDirectory(input);
-		const existing = [...this.sessions.values()].find((s) => s.cwd === cwd);
+		const delegationCwd = realpathSync(cwd);
+		const existing = [...this.sessions.values()].find(
+			(s) => s.cwd === cwd && s.delegationCwd === delegationCwd,
+		);
 		if (existing) {
 			existing.lastUsed = Date.now();
 			return this.refreshSessionDescription(existing);
@@ -169,6 +181,7 @@ export class Bridge {
 		const session: Session = {
 			id: this.newId(),
 			cwd,
+			delegationCwd,
 			pi,
 			contextFiles: pi.resourceLoader
 				.getAgentsFiles()
@@ -311,7 +324,7 @@ export class Bridge {
 		const session = this.session(params.sessionId);
 		const history = delegationHistory(
 			this.pi.sdk,
-			session.cwd,
+			session.delegationCwd,
 			params.delegationId,
 		);
 		const activeJob = this.activeDelegations.get(history.id);
