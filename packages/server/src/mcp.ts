@@ -11,6 +11,7 @@ import {
 	type OpName,
 	type Ops,
 	type SkillSummary,
+	THINKING_LEVELS,
 	WAIT_MS,
 } from "./protocol.ts";
 import { hubOf } from "./stubs.ts";
@@ -33,7 +34,7 @@ const INSTRUCTIONS = `pi-bridge 让你在用户的电脑上读写文件、运行
 3. open_session 还会列出电脑上可用的 Skills。任务符合某个 Skill 的描述时，先用 call 调用 read 读取它的 SKILL.md，再按说明操作。
 4. 运行命令用 run；读取、搜索、修改文件用 call 调用 read、grep、find、ls、edit、write。
 5. list_capabilities 列出扩展和 MCP 服务器提供的其他工具。
-6. run 和 call 最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id，用 wait 继续获取输出，用 cancel 停止。`;
+6. 用户允许当前任务使用 Pi 时，可以用 delegate 委派；需要基于上次委派继续追问时传入 delegation_id。run、call 和 delegate 最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id，用 wait 获取后续输出或结果，用 cancel 停止。`;
 
 export function handleMcp(
 	request: Request,
@@ -53,7 +54,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 	);
 	const hub = hubOf(env, userId);
 	const sessionId = z.string().describe("open_session 返回的 session_id");
-	const jobId = z.string().describe("run 或 call 返回的 job_id");
+	const jobId = z.string().describe("run、call 或 delegate 返回的 job_id");
 
 	server.registerTool(
 		"open_session",
@@ -77,12 +78,33 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 			if (!result.ok) {
 				return errorResult(result.error);
 			}
-			const { sessionId, deviceName, contextFiles, skills } = result.result;
+			const {
+				sessionId,
+				deviceName,
+				contextFiles,
+				skills,
+				delegationEnabled,
+				hasModels,
+				defaultModel,
+			} = result.result;
 			const lines = [
 				`session_id: ${sessionId}`,
 				`设备：${deviceName}`,
 				`目录：${result.result.cwd}`,
 			];
+			if (hasModels === undefined) {
+				lines.push("Pi 委派：请更新本机 pi-bridge 后使用。");
+			} else {
+				lines.push(
+					`Pi 委派：${delegationEnabled ? "已开启" : "已关闭"}`,
+					`Pi 模型：${hasModels ? "有可选模型" : "没有可选模型"}`,
+				);
+			}
+			if (defaultModel) {
+				lines.push(
+					`默认模型：${defaultModel.model}（思考等级：${defaultModel.thinkingLevel}）`,
+				);
+			}
 			if (contextFiles.length > 0) {
 				lines.push(
 					"",
@@ -91,7 +113,6 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 				);
 			}
 			if (skills === undefined) {
-				// 旧版 CLI 不返回 Skills
 				lines.push("", "可用的 Skills 用 list_capabilities 查看。");
 			} else if (skills.length > 0) {
 				lines.push(
@@ -171,10 +192,81 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 	);
 
 	server.registerTool(
+		"list_models",
+		{
+			title: "列出 Pi 模型",
+			description: "列出当前会话可选的 Pi 模型和各自支持的思考等级。",
+			inputSchema: z.object({ session_id: sessionId }),
+			annotations: { readOnlyHint: true, openWorldHint: true },
+		},
+		async ({ session_id }) => {
+			const result = await forward(hub, "list_models", {
+				sessionId: session_id,
+			});
+			if (!result.ok) {
+				return errorResult(result.error);
+			}
+			return textResult(
+				result.result
+					.map(
+						({ id, name, thinkingLevels }) =>
+							`- ${id}（${name}，思考等级：${thinkingLevels.join("、")}）`,
+					)
+					.join("\n") || "没有可选的 Pi 模型。",
+			);
+		},
+	);
+
+	server.registerTool(
+		"delegate",
+		{
+			title: "委派任务给 Pi",
+			description: `在会话目录中把任务交给 Pi 执行，仅在用户允许或要求使用 Pi 时调用。不传 delegation_id 时会在全新独立会话中执行（Pi 看不到当前聊天上下文，需在 task 中提供完整背景、目标和约束）；需要基于之前某次委派继续追问或补充修改时，可自主传入它返回的 delegation_id 以复用上下文。最多等待约 ${WAIT_SECONDS} 秒，未完成时返回 job_id 和当前进度，用 wait 获取后续进度或结果，用 cancel 停止。`,
+			inputSchema: z.object({
+				session_id: sessionId,
+				task: z.string().trim().min(1).describe("交给 Pi 的任务描述"),
+				delegation_id: z
+					.string()
+					.trim()
+					.min(1)
+					.optional()
+					.describe(
+						"需要追问或续接某次已有委派时传入它返回的 delegation_id；省略则开启全新的独立会话",
+					),
+				model: z
+					.string()
+					.trim()
+					.min(1)
+					.optional()
+					.describe(
+						"list_models 返回的模型 ID，省略时使用 Pi 的默认模型（续接时保持该委派会话当前模型）",
+					),
+				thinking_level: z
+					.enum(THINKING_LEVELS)
+					.optional()
+					.describe(
+						"思考等级，省略时使用 Pi 的配置（续接时保持该委派会话当前设置）",
+					),
+			}),
+			annotations: { destructiveHint: true, openWorldHint: true },
+		},
+		async ({ session_id, task, delegation_id, model, thinking_level }) =>
+			jobResult(
+				await forward(hub, "delegate", {
+					sessionId: session_id,
+					task,
+					delegationId: delegation_id,
+					model,
+					thinkingLevel: thinking_level,
+				}),
+			),
+	);
+
+	server.registerTool(
 		"wait",
 		{
 			title: "等待任务",
-			description: `继续等待 run 或 call 的任务，最多约 ${WAIT_SECONDS} 秒，返回上次之后的新增输出。`,
+			description: `等待任务，最多约 ${WAIT_SECONDS} 秒，返回新增输出或任务结果。`,
 			inputSchema: z.object({ job_id: jobId }),
 			annotations: { readOnlyHint: true, openWorldHint: false },
 		},
@@ -186,7 +278,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 		"cancel",
 		{
 			title: "停止任务",
-			description: "停止 run 或 call 的任务。",
+			description: "停止 run、call 或 delegate 的任务。",
 			inputSchema: z.object({ job_id: jobId }),
 			annotations: { destructiveHint: false, openWorldHint: false },
 		},
@@ -282,6 +374,16 @@ function jobResult(result: Result<JobResult>): CallToolResult {
 	}
 	const job = result.result;
 	const parts = [formatStatus(job)];
+	if (job.delegationId) {
+		parts.push(
+			`delegation_id: ${job.delegationId}（需要继续追问此委派时传给 delegate）`,
+		);
+	}
+	if (job.modelSelection) {
+		parts.push(
+			`Pi 模型：${job.modelSelection.model}（思考等级：${job.modelSelection.thinkingLevel}）`,
+		);
+	}
 	if (job.fullOutputPath) {
 		parts.push(
 			`输出过长，已省略中间部分。完整输出保存在 ${job.fullOutputPath}，可以用 call 调用 read 或 grep 查看。`,
@@ -315,7 +417,7 @@ function formatStatus(job: JobResult): string {
 		return `已结束，退出码 ${job.exitCode ?? "无"}（用时 ${seconds} 秒）。`;
 	}
 	return job.isError
-		? `工具返回错误（用时 ${seconds} 秒）。`
+		? `任务失败（用时 ${seconds} 秒）。`
 		: `已完成（用时 ${seconds} 秒）。`;
 }
 

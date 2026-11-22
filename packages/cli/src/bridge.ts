@@ -18,15 +18,24 @@ import type {
 	Capabilities,
 	Image,
 	JobResult,
+	ModelSelection,
+	ModelSummary,
 	Ops,
 	Request,
 	Response,
 	SkillSummary,
+	ThinkingLevel,
 } from "../../server/src/protocol.ts";
 import { WAIT_MS } from "../../server/src/protocol.ts";
 import { JOBS_DIR } from "./config.ts";
 import { clip, readLog } from "./output.ts";
 import type { PiSdk } from "./pi.ts";
+import {
+	type DelegationOptions,
+	delegationHistory,
+	runPiDelegation,
+	saveDelegationSelection,
+} from "./pi-delegation.ts";
 
 /** 会话空闲这么久且没有运行中的任务时释放。 */
 const SESSION_IDLE_MS = 30 * 60_000;
@@ -44,7 +53,7 @@ interface Session {
 
 interface Job {
 	id: string;
-	kind: "run" | "call";
+	kind: JobResult["kind"];
 	session: Session;
 	startedAt: number;
 	endedAt?: number;
@@ -52,28 +61,35 @@ interface Job {
 	done: Promise<void>;
 	abort: AbortController;
 	cancelled: boolean;
-	/** run 的输出日志；call 的结果过长时也写在这里。 */
+	/** run 的输出日志；call 和 delegate 的结果过长时也写在这里。 */
 	logPath: string;
 	/** run：已写入日志和已返回给网页 AI 的字节数。 */
 	written: number;
 	delivered: number;
 	exitCode?: number | null;
-	/** call：工具的返回结果，只返回一次。 */
-	result?: { text: string; images: Image[]; isError: boolean };
+	result?: { text: string; images?: Image[]; isError: boolean };
 	resultDelivered: boolean;
+	/** delegate：等待返回的进度。 */
+	progress: string[];
+	delegationId?: string;
+	modelSelection?: ModelSelection;
 }
 
 /** 在本机维护会话和任务，执行 Worker 转发来的操作。 */
 export class Bridge {
 	deviceId: string;
 	pi: PiSdk;
+	waitMs: number;
 	sessions = new Map<string, Session>();
+	private activeDelegations = new Map<string, string>();
+	private shuttingDown = false;
 	jobs = new Map<string, Job>();
 	sweeper: NodeJS.Timeout;
 
-	constructor(deviceId: string, pi: PiSdk) {
+	constructor(deviceId: string, pi: PiSdk, waitMs = WAIT_MS) {
 		this.deviceId = deviceId;
 		this.pi = pi;
+		this.waitMs = waitMs;
 		this.sweeper = setInterval(() => this.releaseIdleSessions(), 60_000);
 		removeOldJobLogs();
 	}
@@ -91,11 +107,29 @@ export class Bridge {
 
 	/** 退出前停止所有任务，避免留下子进程；再关闭会话，让扩展清理资源。 */
 	async shutdown(): Promise<void> {
+		this.shuttingDown = true;
 		clearInterval(this.sweeper);
 		for (const job of this.jobs.values()) {
 			job.abort.abort();
 		}
-		await Promise.all([...this.sessions.values()].map(closeSession));
+		await Promise.all(
+			[...this.jobs.values()]
+				.filter((job) => job.kind === "delegate")
+				.map((job) => job.done),
+		);
+		const runtimes = new Set(
+			[...this.sessions.values()].map(({ pi }) => pi.modelRuntime),
+		);
+		await Promise.all(
+			[...this.sessions.values()].map(({ pi }) => closePiSession(pi)),
+		);
+		await Promise.all(
+			[...runtimes].map((runtime) =>
+				typeof runtime.settleCredentialWrites === "function"
+					? runtime.settleCredentialWrites().catch(() => {})
+					: undefined,
+			),
+		);
 	}
 
 	private dispatch(request: Request): Promise<Ops[Request["op"]]["result"]> {
@@ -110,6 +144,10 @@ export class Bridge {
 				return this.run(request.params);
 			case "call":
 				return this.call(request.params);
+			case "list_models":
+				return this.listModels(request.params.sessionId);
+			case "delegate":
+				return this.delegate(request.params);
 			case "wait":
 				return this.waitJob(this.job(request.params.jobId));
 			case "cancel":
@@ -124,14 +162,67 @@ export class Bridge {
 		const existing = [...this.sessions.values()].find((s) => s.cwd === cwd);
 		if (existing) {
 			existing.lastUsed = Date.now();
-			return {
-				sessionId: existing.id,
-				cwd,
-				contextFiles: existing.contextFiles,
-				skills: promptSkills(existing.pi),
-			};
+			return this.refreshSessionDescription(existing);
 		}
 
+		const pi = await this.createPiSession(cwd);
+		const session: Session = {
+			id: this.newId(),
+			cwd,
+			pi,
+			contextFiles: pi.resourceLoader
+				.getAgentsFiles()
+				.agentsFiles.map((f) => f.path),
+			lastUsed: Date.now(),
+			jobs: new Set(),
+		};
+		this.sessions.set(session.id, session);
+		return describeSession(session);
+	}
+
+	private async refreshSessionDescription(
+		session: Session,
+	): Promise<Ops["open_session"]["result"]> {
+		const startup = await this.resolveStartupSelection(session);
+		return describeSession(session, startup);
+	}
+
+	private async resolveStartupSelection(
+		session: Session,
+		signal?: AbortSignal,
+	): Promise<{
+		model: AgentSession["model"];
+		thinkingLevel: ThinkingLevel;
+		modelRuntime: AgentSession["modelRuntime"];
+	}> {
+		const { sdk } = this.pi;
+		const { cwd, pi } = session;
+		await pi.modelRuntime.refresh({ allowNetwork: false, signal });
+		signal?.throwIfAborted();
+		// 让 SDK 按最新设置解析启动模型，继续使用工作会话已注册的模型提供商。
+		const { session: startup } = await sdk.createAgentSession({
+			cwd,
+			modelRuntime: pi.modelRuntime,
+			resourceLoader: new sdk.DefaultResourceLoader({
+				cwd,
+				agentDir: sdk.getAgentDir(),
+				noExtensions: true,
+			}),
+			sessionManager: sdk.SessionManager.inMemory(cwd),
+			noTools: "all",
+		});
+		try {
+			return {
+				model: startup.model,
+				thinkingLevel: startup.thinkingLevel,
+				modelRuntime: startup.modelRuntime,
+			};
+		} finally {
+			startup.dispose();
+		}
+	}
+
+	private async createPiSession(cwd: string): Promise<AgentSession> {
 		const { sdk } = this.pi;
 		const resourceLoader = new sdk.DefaultResourceLoader({
 			cwd,
@@ -166,25 +257,13 @@ export class Bridge {
 			sessionManager: sdk.SessionManager.inMemory(cwd),
 		});
 		// 触发 session_start，扩展在这里完成初始化，MCP 服务器开始连接
-		await pi.bindExtensions({});
-
-		const session: Session = {
-			id: this.newId(),
-			cwd,
-			pi,
-			contextFiles: resourceLoader
-				.getAgentsFiles()
-				.agentsFiles.map((f) => f.path),
-			lastUsed: Date.now(),
-			jobs: new Set(),
-		};
-		this.sessions.set(session.id, session);
-		return {
-			sessionId: session.id,
-			cwd,
-			contextFiles: session.contextFiles,
-			skills: promptSkills(pi),
-		};
+		try {
+			await pi.bindExtensions({});
+		} catch (error) {
+			pi.dispose();
+			throw error;
+		}
+		return pi;
 	}
 
 	private listCapabilities(sessionId: string, names?: string[]): Capabilities {
@@ -209,6 +288,140 @@ export class Bridge {
 		return {
 			tools: tools.map((t) => ({ name: t.name, description: t.description })),
 			skills: allSkills(pi).map(toSummary),
+		};
+	}
+
+	private async listModels(sessionId: string): Promise<ModelSummary[]> {
+		const { pi } = this.session(sessionId);
+		await pi.modelRuntime.refresh({ allowNetwork: false });
+		const models = await pi.modelRuntime.getAvailable();
+		return models.map((model) => ({
+			id: modelId(model),
+			name: model.name,
+			thinkingLevels: this.pi.ai.getSupportedThinkingLevels(model),
+		}));
+	}
+
+	private async delegate(
+		params: Ops["delegate"]["params"],
+	): Promise<JobResult> {
+		if (this.shuttingDown) {
+			throw new Error("pi-bridge 正在退出，请重启后再委派任务。");
+		}
+		const session = this.session(params.sessionId);
+		const history = delegationHistory(
+			this.pi.sdk,
+			session.cwd,
+			params.delegationId,
+		);
+		const activeJob = this.activeDelegations.get(history.id);
+		if (activeJob) {
+			throw new Error(
+				`该委派会话正在运行任务（job_id: ${activeJob}），请先等待完成或取消。`,
+			);
+		}
+
+		const job = this.createJob(params.jobId, "delegate", session);
+		this.activeDelegations.set(history.id, job.id);
+		job.delegationId = history.file ? history.id : undefined;
+		const signal = job.abort.signal;
+		job.done = (async () => {
+			try {
+				const overrides = await this.delegationOverrides(
+					session,
+					params,
+					history.file,
+					signal,
+				);
+				const result = await runPiDelegation(
+					this.pi.cliPath,
+					history,
+					{ task: params.task, ...overrides },
+					signal,
+					(line) => job.progress.push(line),
+				);
+				job.result = result;
+				job.modelSelection = result.modelSelection;
+				const file = this.pi.sdk.SessionManager.findById(
+					history.cwd,
+					history.id,
+					history.dir,
+				);
+				if (file) {
+					job.delegationId = history.id;
+					if (!signal.aborted && !result.isError) {
+						saveDelegationSelection(this.pi.sdk, file, overrides);
+					}
+				}
+			} catch (error) {
+				if (!signal.aborted) {
+					job.result = {
+						text: error instanceof Error ? error.message : String(error),
+						isError: true,
+					};
+				}
+			} finally {
+				this.activeDelegations.delete(history.id);
+				this.finish(job);
+			}
+		})();
+		return this.waitJob(job);
+	}
+
+	private async delegationOverrides(
+		session: Session,
+		{ model, thinkingLevel }: Ops["delegate"]["params"],
+		sessionFile: string | undefined,
+		signal: AbortSignal,
+	): Promise<DelegationOptions> {
+		if (!sessionFile && !model && !thinkingLevel) {
+			return {};
+		}
+
+		const previous = sessionFile
+			? this.pi.sdk.SessionManager.open(sessionFile).buildSessionContext()
+			: undefined;
+		const { modelRuntime } = session.pi;
+		if (sessionFile && !previous?.model && !model) {
+			throw new Error("这次委派没有记录模型，请指定模型后继续。");
+		}
+		const requestedModel =
+			model ??
+			(previous?.model &&
+				`${previous.model.provider}/${previous.model.modelId}`);
+		let selected: AgentSession["model"];
+		if (requestedModel) {
+			await modelRuntime.refresh({ allowNetwork: false, signal });
+			const available = await modelRuntime.getAvailable(undefined, { signal });
+			selected = available.find(
+				(candidate) => modelId(candidate) === requestedModel,
+			);
+			if (!selected) {
+				throw new Error(
+					`Pi 模型「${requestedModel}」不可用，请用 list_models 查看可选模型。`,
+				);
+			}
+		} else {
+			const startup = await this.resolveStartupSelection(session, signal);
+			selected = startup.model;
+			if (!selected || !modelRuntime.getModel(selected.provider, selected.id)) {
+				throw new Error("没有选中的 Pi 模型，请在电脑上的 Pi 中配置默认模型。");
+			}
+		}
+
+		const allowed = this.pi.ai.getSupportedThinkingLevels(selected);
+		if (thinkingLevel && !allowed.includes(thinkingLevel)) {
+			throw new Error(
+				`Pi 模型「${modelId(selected)}」不支持思考等级 ${thinkingLevel}。可用等级：${allowed.join("、")}。`,
+			);
+		}
+		return {
+			model: requestedModel
+				? { provider: selected.provider, id: selected.id }
+				: undefined,
+			thinkingLevel:
+				thinkingLevel ??
+				allowed.find((level) => level === previous?.thinkingLevel),
 		};
 	}
 
@@ -428,18 +641,21 @@ export class Bridge {
 		if (!job.finished) {
 			job.cancelled = true;
 			job.abort.abort();
+			if (job.kind === "delegate") {
+				return this.waitJob(job);
+			}
 			await job.done;
 		}
 		return this.collect(job);
 	}
 
-	/** 最多等待 WAIT_MS，返回上次之后的新增输出。 */
+	/** 最多等待 waitMs，返回上次之后的新增输出。 */
 	private async waitJob(job: Job): Promise<JobResult> {
 		if (!job.finished) {
 			const timer = new AbortController();
 			await Promise.race([
 				job.done,
-				sleep(WAIT_MS, undefined, { signal: timer.signal }).catch(() => {}),
+				sleep(this.waitMs, undefined, { signal: timer.signal }).catch(() => {}),
 			]);
 			timer.abort();
 		}
@@ -454,6 +670,8 @@ export class Bridge {
 			status: job.finished ? ("done" as const) : ("running" as const),
 			elapsedMs: (job.endedAt ?? Date.now()) - job.startedAt,
 			cancelled: job.cancelled || undefined,
+			delegationId: job.finished ? job.delegationId : undefined,
+			modelSelection: job.modelSelection,
 		};
 		if (job.kind === "run") {
 			const { text, clipped, end } = readLog(
@@ -470,19 +688,25 @@ export class Bridge {
 				exitCode: job.finished ? job.exitCode : undefined,
 			};
 		}
+		if (job.kind === "delegate" && !job.finished) {
+			return {
+				...base,
+				output: clip(job.progress.splice(0).join("\n")).text,
+			};
+		}
 
 		if (!job.result) {
 			return { ...base, output: "" };
 		}
 		const isError = job.result.isError || undefined;
-		if (job.resultDelivered) {
+		if (job.kind === "call" && job.resultDelivered) {
 			return { ...base, output: "", isError };
 		}
-		job.resultDelivered = true;
 		const { text, clipped } = clip(job.result.text);
-		if (clipped) {
+		if (clipped && !job.resultDelivered) {
 			writeFileSync(job.logPath, job.result.text);
 		}
+		job.resultDelivered = true;
 		return {
 			...base,
 			output: text,
@@ -507,6 +731,7 @@ export class Bridge {
 			written: 0,
 			delivered: 0,
 			resultDelivered: false,
+			progress: [],
 		};
 		this.jobs.set(id, job);
 		session.jobs.add(id);
@@ -517,6 +742,9 @@ export class Bridge {
 	private finish(job: Job): void {
 		job.finished = true;
 		job.endedAt = Date.now();
+		if (job.kind === "delegate") {
+			job.session.lastUsed = job.endedAt;
+		}
 	}
 
 	private session(id: string): Session {
@@ -549,7 +777,7 @@ export class Bridge {
 				this.jobs.delete(id);
 			}
 			this.sessions.delete(session.id);
-			void closeSession(session);
+			void closePiSession(session.pi);
 			log(`释放空闲会话 ${session.cwd}`);
 		}
 	}
@@ -561,12 +789,44 @@ export class Bridge {
 }
 
 /** 像退出 pi 时一样先触发 session_shutdown，扩展在这里断开 MCP 服务器等资源。 */
-async function closeSession(session: Session): Promise<void> {
-	const runner = session.pi.extensionRunner;
-	if (runner.hasHandlers("session_shutdown")) {
-		await runner.emit({ type: "session_shutdown", reason: "quit" });
+async function closePiSession(pi: AgentSession): Promise<void> {
+	const runner = pi.extensionRunner;
+	try {
+		if (runner.hasHandlers("session_shutdown")) {
+			await runner.emit({ type: "session_shutdown", reason: "quit" });
+		}
+	} finally {
+		pi.dispose();
 	}
-	session.pi.dispose();
+}
+
+function describeSession(
+	session: Session,
+	startup: {
+		model: AgentSession["model"];
+		thinkingLevel: ThinkingLevel;
+		modelRuntime: AgentSession["modelRuntime"];
+	} = session.pi,
+): Ops["open_session"]["result"] {
+	const { id, cwd, contextFiles, pi } = session;
+	const { model, thinkingLevel, modelRuntime } = startup;
+	const models = modelRuntime.getAvailableSnapshot();
+	const selected =
+		model && models.find((candidate) => modelId(candidate) === modelId(model));
+	return {
+		sessionId: id,
+		cwd,
+		contextFiles,
+		skills: promptSkills(pi),
+		hasModels: models.length > 0,
+		defaultModel: selected
+			? { model: modelId(selected), thinkingLevel }
+			: undefined,
+	};
+}
+
+function modelId(model: { provider: string; id: string }): string {
+	return `${model.provider}/${model.id}`;
 }
 
 type Skill = ReturnType<
@@ -631,6 +891,8 @@ function describe(request: Request): string {
 			return `运行 ${request.params.command.slice(0, 200)}`;
 		case "call":
 			return `调用 ${request.params.tool}`;
+		case "delegate":
+			return request.params.delegationId ? "委派 Pi（续接）" : "委派 Pi";
 		default:
 			return request.op;
 	}
