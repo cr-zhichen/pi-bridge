@@ -26,7 +26,7 @@ import { installVersion, isNewer, latestVersion } from "./update.ts";
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const HELP = `pi-bridge ${pkg.version}
-让 Claude 和 ChatGPT 网页版调用这台电脑上的 Pi。
+让网页版 AI 调用这台电脑上的 Pi。
 
 用法：
   pi-bridge login <服务地址> <密钥>   登录 pi-bridge 服务

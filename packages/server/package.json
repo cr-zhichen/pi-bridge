@@ -1,6 +1,6 @@
 {
 	"name": "pi-bridge-server",
-	"version": "0.10.0",
+	"version": "0.11.0",
 	"private": true,
 	"type": "module",
 	"description": "pi-bridge 服务端：Cloudflare Workers + Durable Objects",
