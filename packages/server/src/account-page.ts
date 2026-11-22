@@ -53,6 +53,19 @@ ${PAGE_HEAD}
 		.switch, .switch[data-tip]::before, .switch[data-tip]::after, .switch input, .switch input::before { transition: none; }
 	}
 	.advanced-body > .card + .card { margin-top: 0; }
+	.connector-tabs { align-items: center; }
+	.connector-tabs .tab { display: inline-flex; align-items: center; white-space: nowrap; }
+	.connector-tabs .tab-prompt { margin-left: auto; gap: 6px; }
+	.connector-tabs .tab-prompt svg { flex: none; opacity: .72; transition: opacity .15s; }
+	.connector-tabs .tab-prompt:hover svg, .connector-tabs .tab-prompt.on svg { opacity: 1; }
+	.connector-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px;
+		font-size: 13px; color: var(--muted); }
+	.prompt-copy { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+	.prompt-copy.copied { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
+	.connector-prompt { padding: 12px 14px; display: grid; gap: 8px; background: var(--surface-2);
+		border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6; color: var(--text); }
+	.connector-prompt p { margin: 0; overflow-wrap: anywhere; }
+	.connector-prompt .prompt-url { font-family: var(--mono); font-size: 12.5px; }
 	.url-key-form { box-shadow: none; padding: 16px; display: grid; gap: 16px; }
 	.url-key-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
 		padding-top: 14px; border-top: 1px solid var(--border); }
@@ -61,7 +74,17 @@ ${PAGE_HEAD}
 		#devices .row-divider { display: none; }
 		.switch[data-tip]::before { left: 34px; right: auto; }
 		.switch[data-tip]::after { left: 0; right: auto; }
+		.connector-prompt-head { flex-wrap: wrap; }
 		.url-key-foot { flex-direction: column; align-items: stretch; }
+	}
+	@media (max-width: 420px) {
+		.connector-tabs { gap: 2px; }
+		.connector-tabs .tab { padding-inline: 6px; font-size: 13px; }
+		.connector-tabs .tab-prompt { gap: 4px; }
+	}
+	@media (max-width: 380px) {
+		.connector-tabs .tab { padding-inline: 4px; }
+		.connector-tabs .tab-prompt svg { display: none; }
 	}
 </style>
 </head>
@@ -120,16 +143,21 @@ ${PAGE_HEAD}
 			<div class="block-head">
 				<div>
 					<h2>连接网页版 AI</h2>
-					<p class="sub">在 Claude 或 ChatGPT 中添加以下地址，登录后即可使用你的电脑。</p>
+					<p class="sub">在 Claude、ChatGPT 或 Gemini 中添加以下地址，登录后即可使用你的电脑。</p>
 				</div>
 			</div>
 			<div class="card">
 				<span class="label">连接器地址</span>
 				<div class="copy hero" id="connector-url"></div>
 				<p class="note">通用地址，不含密钥。添加后会跳转到此登录并授权。</p>
-				<div class="tabs" role="tablist">
-					<button class="tab on" data-tab="claude" role="tab">Claude</button>
-					<button class="tab" data-tab="chatgpt" role="tab">ChatGPT</button>
+				<div class="tabs connector-tabs" role="tablist">
+					<button class="tab on" data-tab="claude" role="tab" aria-selected="true">Claude</button>
+					<button class="tab" data-tab="chatgpt" role="tab" aria-selected="false">ChatGPT</button>
+					<button class="tab" data-tab="gemini" role="tab" aria-selected="false">Gemini</button>
+					<button class="tab tab-prompt" data-tab="assistant" role="tab" aria-selected="false">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+						<span>AI Prompt</span>
+					</button>
 				</div>
 				<ol class="steps" data-panel="claude">
 					<li><div>在侧边栏打开 <span class="ui">插件 → 连接器</span>，点击 <span class="ui">添加自定义连接器</span></div></li>
@@ -141,6 +169,25 @@ ${PAGE_HEAD}
 					<li><div>名称填 pi-bridge，连接选 <span class="ui">服务器 URL</span> 并粘贴上方地址，身份验证选 <span class="ui">OAuth</span></div></li>
 					<li><div>勾选确认提示并点击 <span class="ui">创建为插件</span>，登录后选择允许访问的电脑</div></li>
 				</ol>
+				<ol class="steps" data-panel="gemini" hidden>
+					<li><div>在侧边栏打开 <span class="ui">自定义 → 关联应用</span>，点击 <span class="ui">+ 自定义</span></div></li>
+					<li><div>将上方地址粘贴到 <span class="ui">MCP 服务器网址</span>，点击 <span class="ui">下一步</span></div></li>
+					<li><div>登录 pi-bridge，选择允许访问的电脑并授权</div></li>
+				</ol>
+				<div data-panel="assistant" hidden>
+					<div class="connector-prompt-head">
+						<span>发给要接入的 AI，让它代为配置。</span>
+						<button class="btn small prompt-copy" id="copy-connector-prompt" type="button">
+							<svg class="icon-copy" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 4H6a2 2 0 0 0-2 2v10"/></svg>
+							<svg class="icon-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M20 6 9 17l-5-5"/></svg>
+							<span>复制提示词</span>
+						</button>
+					</div>
+					<div class="connector-prompt">
+						<p>请在当前使用的 AI 客户端中添加并连接名为 pi-bridge 的远程 MCP 服务器：<br>服务器地址：<span class="prompt-url" id="connector-prompt-url"></span><br>身份验证：OAuth</p>
+						<p>需要登录或授权时，请让我在授权页面操作并选择允许访问的电脑。连接后，请确认能否列出 pi-bridge 的工具；如果你无法直接配置，请说明如何在当前客户端手动添加。</p>
+					</div>
+				</div>
 			</div>
 
 			<div class="card list">
@@ -571,11 +618,46 @@ async function load() {
 
 // ---------- 事件 ----------
 
-$("connector-url").replaceChildren(el("code", { textContent: location.origin + "/mcp" }), copyButton(location.origin + "/mcp", "btn primary"));
+const connectorUrl = location.origin + "/mcp";
+$("connector-url").replaceChildren(el("code", { textContent: connectorUrl }), copyButton(connectorUrl, "btn primary"));
+
+const connectorPrompt = [
+	"请在当前使用的 AI 客户端中添加并连接名为 pi-bridge 的远程 MCP 服务器：",
+	"服务器地址：" + connectorUrl,
+	"身份验证：OAuth",
+	"",
+	"需要登录或授权时，请让我在授权页面操作并选择允许访问的电脑。连接后，请确认能否列出 pi-bridge 的工具；如果你无法直接配置，请说明如何在当前客户端手动添加。",
+].join("\\n");
+$("connector-prompt-url").textContent = connectorUrl;
+let promptCopyTimer = null;
+$("copy-connector-prompt").onclick = async () => {
+	const btn = $("copy-connector-prompt");
+	try {
+		await navigator.clipboard.writeText(connectorPrompt);
+	} catch {
+		toast("复制失败，请手动复制", true);
+		return;
+	}
+	btn.classList.add("copied");
+	btn.querySelector(".icon-copy").hidden = true;
+	btn.querySelector(".icon-check").hidden = false;
+	btn.querySelector("span").textContent = "已复制";
+	clearTimeout(promptCopyTimer);
+	promptCopyTimer = setTimeout(() => {
+		btn.classList.remove("copied");
+		btn.querySelector(".icon-copy").hidden = false;
+		btn.querySelector(".icon-check").hidden = true;
+		btn.querySelector("span").textContent = "复制提示词";
+	}, 1500);
+};
 
 for (const tab of document.querySelectorAll("[data-tab]")) {
 	tab.onclick = () => {
-		for (const t of document.querySelectorAll("[data-tab]")) t.classList.toggle("on", t === tab);
+		for (const t of document.querySelectorAll("[data-tab]")) {
+			const active = t === tab;
+			t.classList.toggle("on", active);
+			t.setAttribute("aria-selected", String(active));
+		}
 		for (const panel of document.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== tab.dataset.tab;
 	};
 }
