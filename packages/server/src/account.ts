@@ -151,16 +151,23 @@ export async function handleAccount(
 
 	if (path === "me/keys") {
 		const body = await readJson(request);
-		const name = typeof body.name === "string" ? body.name.trim() : "";
-		if (!name || name.length > 64) {
-			return jsonError("请填写名称，不超过 64 个字符");
-		}
 		if (body.type !== "device" && body.type !== "connector") {
 			return jsonError("密钥类型无效");
 		}
+		const label = body.type === "device" ? "电脑名称" : "地址名称";
+		if (body.name !== undefined && typeof body.name !== "string") {
+			return jsonError(`请填写有效的${label}`);
+		}
+		const name = body.name?.trim() ?? "";
+		if (name.length > 64) {
+			return jsonError(`${label}不能超过 64 个字符`);
+		}
+		if (body.type === "connector" && !name) {
+			return jsonError("请填写地址名称");
+		}
 		const result = await registry.createKey(
 			user.id,
-			name,
+			name || "新电脑",
 			body.type,
 			body.deviceIds,
 		);

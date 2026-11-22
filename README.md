@@ -49,10 +49,10 @@ pi-bridge 让 Claude 和 ChatGPT 网页版使用你电脑上的 [Pi](https://pi.
 npm install -g @zgccrui/pi-bridge
 ```
 
-在账号页点「添加电脑」，填写电脑名称后会生成这台电脑专用的登录命令。在电脑上运行它，然后启动 pi-bridge：
+在账号页点「添加电脑」，生成登录命令并在电脑上运行，然后启动 pi-bridge：
 
 ```bash
-pi-bridge login https://<服务地址> <密钥> --name <电脑名称>
+pi-bridge login https://<服务地址> <密钥>
 pi-bridge start
 ```
 

@@ -192,8 +192,8 @@ ${PAGE_HEAD}
 			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<form id="add-form">
-			<span class="label">电脑名称</span>
-			<input class="input" id="add-name" placeholder="例如：MacBook Pro" maxlength="64" autocomplete="off" required>
+			<label class="label" for="add-name">电脑名称（选填）</label>
+			<input class="input" id="add-name" placeholder="例如：MacBook Pro" maxlength="64" autocomplete="off">
 			<div class="modal-foot"><span></span><button class="btn primary">生成命令</button></div>
 		</form>
 		<div id="add-commands" hidden>
@@ -679,7 +679,7 @@ $("add-form").onsubmit = async (event) => {
 		const { key, token } = await api("me/keys", { name, type: "device" });
 		const commands = [
 			["安装（已安装可跳过）", "npm install -g @zgccrui/pi-bridge"],
-			["登录", "pi-bridge login " + location.origin + " " + token + " --name " + shellQuote(name)],
+			["登录", "pi-bridge login " + location.origin + " " + token + (name ? " --name " + shellQuote(name) : "")],
 			["启动", "pi-bridge start",
 				el("p", { className: "note" }, "如需开机自启，改用 ", el("code", { textContent: "pi-bridge service install" }))],
 		];
