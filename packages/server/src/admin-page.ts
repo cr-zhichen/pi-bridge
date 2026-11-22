@@ -41,12 +41,12 @@ ${PAGE_HEAD}
 			<div class="block-head">
 				<div>
 					<h2>创建用户</h2>
-					<p class="sub">创建后生成初始密码。用户登录账号页并修改密码后，自己添加电脑、连接网页版 AI。</p>
+					<p class="sub">创建后将生成初始密码，用户首次登录修改后即可自行使用。</p>
 				</div>
 			</div>
 			<form id="create" class="card inline-form">
-				<input class="input" id="username" placeholder="用户名，用于登录，例如 zhangsan" autocomplete="off" autocapitalize="none" spellcheck="false" required>
-				<input class="input" id="name" placeholder="显示名称（可选），例如张三" autocomplete="off">
+				<input class="input" id="username" placeholder="用户名（例如 zhangsan）" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+				<input class="input" id="name" placeholder="显示名称（可选）" autocomplete="off">
 				<button class="btn primary">创建用户</button>
 			</form>
 		</section>
@@ -61,7 +61,7 @@ ${PAGE_HEAD}
 <dialog class="modal" id="modal-secret" aria-labelledby="secret-title">
 	<div class="modal-body">
 		<div class="modal-head">
-			<div><h3 id="secret-title"></h3><p class="sub">密码只显示这一次，请立即发给使用者。首次登录后需要修改密码。</p></div>
+			<div><h3 id="secret-title"></h3><p class="sub">密码只显示一次，请立即发给用户，首次登录后需修改。</p></div>
 			<button type="button" class="link" data-close>关闭</button>
 		</div>
 		<div id="secret-body"></div>
@@ -136,7 +136,7 @@ function userRow(user) {
 	const toggle = button(user.disabled ? "启用" : "禁用", "", async () => {
 		if (!user.disabled && !await confirmDialog({
 			title: "禁用 " + user.name + "？",
-			message: "这位用户的电脑会断开，网页版无法再调用，账号页会退出登录。启用后恢复。",
+			message: "禁用后该用户的电脑将断开、网页版无法调用并退出登录，启用后恢复。",
 			confirmText: "禁用", danger: true,
 		})) return;
 		await api("users/" + user.id + "/" + (user.disabled ? "enable" : "disable"), {});
@@ -146,7 +146,7 @@ function userRow(user) {
 		if (user.username) {
 			if (!await confirmDialog({
 				title: "重置 " + user.name + " 的密码？",
-				message: "旧密码立即失效，账号页会退出登录。电脑和网页版不受影响。",
+				message: "旧密码立即失效并退出网页登录，已连接的电脑和 AI 不受影响。",
 				confirmText: "重置密码", danger: true,
 			})) return;
 			const { password } = await api("users/" + user.id + "/reset-password", {});
@@ -155,7 +155,7 @@ function userRow(user) {
 		}
 		const result = await promptDialog({
 			title: "为 " + user.name + " 设置登录账号",
-			message: "设置后会生成初始密码。这位用户原来的电脑和连接器不受影响。",
+			message: "设置后将生成初始密码，不影响原有电脑与授权。",
 			label: "用户名",
 			placeholder: "例如 zhangsan",
 			note: "2 到 32 位，只能包含字母、数字和 _ . -",
@@ -169,7 +169,7 @@ function userRow(user) {
 	const revoke = button("吊销全部访问", "danger", async () => {
 		if (!await confirmDialog({
 			title: "吊销 " + user.name + " 的全部访问？",
-			message: "全部 " + user.keyCount + " 个密钥和 " + user.appCount + " 个应用授权都会失效：所有电脑立即断开，网页版连接器也无法再调用。用户需要登录账号页重新添加。",
+			message: "全部 " + user.keyCount + " 个密钥和 " + user.appCount + " 个应用授权将立即失效，所有电脑断开且需用户重新添加。",
 			confirmText: "吊销全部访问", danger: true,
 		})) return;
 		await api("users/" + user.id + "/revoke-access", {});

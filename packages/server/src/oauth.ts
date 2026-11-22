@@ -5,7 +5,7 @@ import {
 	type OAuthResourceContext,
 } from "@cloudflare/workers-oauth-provider";
 import { handleMcp } from "./mcp.ts";
-import { registryOf } from "./stubs.ts";
+import { hubOf, registryOf } from "./stubs.ts";
 
 /**
  * 网页版连接器的 OAuth：
@@ -20,18 +20,22 @@ import { registryOf } from "./stubs.ts";
 /** completeAuthorization 写入令牌的数据，调用 /mcp 时取回。 */
 export interface AuthProps {
 	userId: string;
+	connectorId: string;
 }
 
 /** 写在授权记录上的元数据，账号页的「已授权的应用」用它显示。 */
 export interface GrantMetadata {
+	connectorId: string;
 	clientName: string;
 	/** CIMD 客户端的域名，由客户端自己控制，可信。动态注册的客户端没有。 */
 	clientDomain?: string;
 	redirectHost: string;
 }
 
-export interface AppInfo extends GrantMetadata {
+export interface AppInfo extends Omit<GrantMetadata, "connectorId"> {
 	id: string;
+	connectorId: string | null;
+	deviceIds: string[] | null;
 	clientId: string;
 	createdAt: number;
 	lastUsedAt: number | null;
@@ -57,7 +61,11 @@ export async function listGrants(
 	return grants;
 }
 
-export async function listApps(env: Env, userId: string): Promise<AppInfo[]> {
+export async function listApps(
+	env: Env,
+	userId: string,
+	access: Record<string, string[]>,
+): Promise<AppInfo[]> {
 	const [grants, usage] = await Promise.all([
 		listGrants(env, userId),
 		registryOf(env).appUsage(userId),
@@ -65,8 +73,13 @@ export async function listApps(env: Env, userId: string): Promise<AppInfo[]> {
 	return grants
 		.map((grant) => {
 			const metadata = (grant.metadata ?? {}) as Partial<GrantMetadata>;
+			const deviceIds = metadata.connectorId
+				? access[metadata.connectorId]
+				: undefined;
 			return {
 				id: grant.id,
+				connectorId: deviceIds ? (metadata.connectorId ?? null) : null,
+				deviceIds: deviceIds ?? null,
 				clientId: grant.clientId,
 				clientName: metadata.clientName || grant.clientId,
 				clientDomain: metadata.clientDomain,
@@ -81,16 +94,37 @@ export async function listApps(env: Env, userId: string): Promise<AppInfo[]> {
 
 /** 撤销用户的全部授权，已发出的令牌立即失效。 */
 export async function revokeAllGrants(env: Env, userId: string): Promise<void> {
-	const oauth = oauthOf(env);
 	for (const grant of await listGrants(env, userId)) {
-		await oauth.revokeGrant(grant.id, userId);
+		await revokeApp(env, userId, grant);
 	}
+}
+
+export async function revokeApp(
+	env: Env,
+	userId: string,
+	grant: GrantSummary,
+): Promise<void> {
+	const metadata = grant.metadata as Partial<GrantMetadata> | undefined;
+	if (metadata?.connectorId) {
+		await hubOf(env, userId).removeConnectorAccess(metadata.connectorId);
+	}
+	await oauthOf(env).revokeGrant(grant.id, userId);
 }
 
 const apiHandler: ExportedHandler<Env> &
 	Pick<Required<ExportedHandler<Env>>, "fetch"> = {
 	async fetch(request, env, ctx) {
 		const { props, auth } = ctx as OAuthResourceContext<AuthProps>;
+		if (
+			!props.connectorId ||
+			(await hubOf(env, props.userId).connectorDevices(props.connectorId)) ===
+				null
+		) {
+			return new Response("请在客户端重新连接并选择允许访问的电脑。", {
+				status: 401,
+				headers: { "WWW-Authenticate": 'Bearer error="invalid_token"' },
+			});
+		}
 		const allowed = await registryOf(env).authorizeApp(
 			props.userId,
 			auth.clientId ?? "",
@@ -98,7 +132,7 @@ const apiHandler: ExportedHandler<Env> &
 		if (!allowed) {
 			return new Response("用户已被禁用", { status: 403 });
 		}
-		return handleMcp(request, env, props.userId);
+		return handleMcp(request, env, props.userId, props.connectorId);
 	},
 };
 

@@ -21,9 +21,7 @@ import {
 	getDownloadLink,
 	TRANSFER_ID_PATTERN,
 } from "./transfers.ts";
-import type { Result, UserHub } from "./user-hub.ts";
-
-type Hub = DurableObjectStub<UserHub>;
+import type { Result } from "./user-hub.ts";
 
 const WAIT_SECONDS = WAIT_MS / 1000;
 
@@ -40,14 +38,20 @@ export function handleMcp(
 	request: Request,
 	env: Env,
 	userId: string,
+	connectorId: string,
 ): Promise<Response> {
 	const origin = new URL(request.url).origin;
-	return createMcpHandler(() => buildServer(env, origin, userId)).fetch(
-		request,
-	);
+	return createMcpHandler(() =>
+		buildServer(env, origin, userId, connectorId),
+	).fetch(request);
 }
 
-function buildServer(env: Env, origin: string, userId: string): McpServer {
+function buildServer(
+	env: Env,
+	origin: string,
+	userId: string,
+	connectorId: string,
+): McpServer {
 	const server = new McpServer(
 		{ name: "pi-bridge", version: pkg.version },
 		{ instructions: INSTRUCTIONS },
@@ -55,6 +59,17 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 	const hub = hubOf(env, userId);
 	const sessionId = z.string().describe("open_session 返回的 session_id");
 	const jobId = z.string().describe("run、call 或 delegate 返回的 job_id");
+
+	async function forward<K extends Exclude<OpName, "open_session">>(
+		op: K,
+		params: Omit<Ops[K]["params"], "jobId"> | Ops[K]["params"],
+	): Promise<Result<Ops[K]["result"]>> {
+		return (await hub.forward(
+			connectorId,
+			op,
+			params as { sessionId: string } | { jobId: string },
+		)) as Result<Ops[K]["result"]>;
+	}
 
 	server.registerTool(
 		"open_session",
@@ -69,12 +84,14 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 				device: z
 					.string()
 					.optional()
-					.describe("设备名称。仅登记了一台设备或只有一台设备在线时可以省略。"),
+					.describe(
+						"电脑名称。只允许访问一台电脑，或允许访问的电脑中只有一台在线时可以省略。",
+					),
 			}),
 			annotations: { readOnlyHint: true, openWorldHint: false },
 		},
 		async ({ cwd, device }) => {
-			const result = await hub.openSession(device, cwd);
+			const result = await hub.openSession(connectorId, device, cwd);
 			if (!result.ok) {
 				return errorResult(result.error);
 			}
@@ -141,7 +158,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 			annotations: { readOnlyHint: true, openWorldHint: false },
 		},
 		async ({ session_id, tools }) => {
-			const result = await forward(hub, "list_capabilities", {
+			const result = await forward("list_capabilities", {
 				sessionId: session_id,
 				tools,
 			});
@@ -171,9 +188,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 			annotations: { destructiveHint: true, openWorldHint: true },
 		},
 		async ({ session_id, tool, args }) =>
-			jobResult(
-				await forward(hub, "call", { sessionId: session_id, tool, args }),
-			),
+			jobResult(await forward("call", { sessionId: session_id, tool, args })),
 	);
 
 	server.registerTool(
@@ -188,7 +203,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 			annotations: { destructiveHint: true, openWorldHint: true },
 		},
 		async ({ session_id, command }) =>
-			jobResult(await forward(hub, "run", { sessionId: session_id, command })),
+			jobResult(await forward("run", { sessionId: session_id, command })),
 	);
 
 	server.registerTool(
@@ -200,7 +215,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 			annotations: { readOnlyHint: true, openWorldHint: true },
 		},
 		async ({ session_id }) => {
-			const result = await forward(hub, "list_models", {
+			const result = await forward("list_models", {
 				sessionId: session_id,
 			});
 			if (!result.ok) {
@@ -252,7 +267,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 		},
 		async ({ session_id, task, delegation_id, model, thinking_level }) =>
 			jobResult(
-				await forward(hub, "delegate", {
+				await forward("delegate", {
 					sessionId: session_id,
 					task,
 					delegationId: delegation_id,
@@ -270,8 +285,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 			inputSchema: z.object({ job_id: jobId }),
 			annotations: { readOnlyHint: true, openWorldHint: false },
 		},
-		async ({ job_id }) =>
-			jobResult(await forward(hub, "wait", { jobId: job_id })),
+		async ({ job_id }) => jobResult(await forward("wait", { jobId: job_id })),
 	);
 
 	server.registerTool(
@@ -282,8 +296,7 @@ function buildServer(env: Env, origin: string, userId: string): McpServer {
 			inputSchema: z.object({ job_id: jobId }),
 			annotations: { destructiveHint: false, openWorldHint: false },
 		},
-		async ({ job_id }) =>
-			jobResult(await forward(hub, "cancel", { jobId: job_id })),
+		async ({ job_id }) => jobResult(await forward("cancel", { jobId: job_id })),
 	);
 
 	registerTransferTools(server, env.TRANSFER_FILES, origin, userId);
@@ -355,17 +368,6 @@ function registerTransferTools(
 				? textResult("已删除临时文件")
 				: errorResult("文件已删除或无法访问，请检查文件 ID"),
 	);
-}
-
-async function forward<K extends Exclude<OpName, "open_session">>(
-	hub: Hub,
-	op: K,
-	params: Omit<Ops[K]["params"], "jobId"> | Ops[K]["params"],
-): Promise<Result<Ops[K]["result"]>> {
-	return (await hub.forward(
-		op,
-		params as { sessionId: string } | { jobId: string },
-	)) as Result<Ops[K]["result"]>;
 }
 
 function jobResult(result: Result<JobResult>): CallToolResult {

@@ -139,7 +139,8 @@ export class Registry extends DurableObject<Env> {
 	async createKey(
 		userId: string,
 		name: string,
-		scopes: Scope[],
+		scope: Scope,
+		deviceIds: unknown,
 	): Promise<Outcome<{ key: KeyInfo; token: string }>> {
 		const count = this.sql
 			.exec<{ n: number }>(
@@ -157,18 +158,28 @@ export class Registry extends DurableObject<Env> {
 		const key: KeyInfo = {
 			id: randomId(8),
 			name,
-			scopes,
+			scopes: [scope],
 			hint: token.slice(-4),
 			createdAt: Date.now(),
 			lastUsedAt: null,
 		};
+		const tokenHash = await hashToken(token);
+		if (scope === "connector") {
+			const access = await hubOf(this.env, userId).setConnectorDevices(
+				key.id,
+				deviceIds,
+			);
+			if (!access.ok) {
+				return access;
+			}
+		}
 		this.sql.exec(
 			"INSERT INTO keys (id, user_id, name, token_hash, scopes, hint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			key.id,
 			userId,
 			name,
-			await hashToken(token),
-			scopes.join(" "),
+			tokenHash,
+			scope,
 			key.hint,
 			key.createdAt,
 		);
@@ -193,8 +204,13 @@ export class Registry extends DurableObject<Env> {
 		if (!this.getUser(userId)) {
 			return false;
 		}
-		this.sql.exec("DELETE FROM keys WHERE user_id = ?", userId);
-		await hubOf(this.env, userId).revoke();
+		const keys = this.sql
+			.exec<{ id: string }>(
+				"DELETE FROM keys WHERE user_id = ? RETURNING id",
+				userId,
+			)
+			.toArray();
+		await hubOf(this.env, userId).revokeAllKeys(keys.map((key) => key.id));
 		return true;
 	}
 
