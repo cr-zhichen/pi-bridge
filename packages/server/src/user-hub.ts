@@ -501,7 +501,8 @@ export class UserHub extends DurableObject<Env> {
 				return { ok: false, error: DEVICE_NOT_ALLOWED };
 			}
 		}
-		const usesDelegation = op === "delegate" || op === "list_models";
+		const usesDelegation =
+			op === "delegate" || op === "list_models" || op === "list_delegations";
 		if (usesDelegation && !this.delegationEnabled(deviceId)) {
 			return {
 				ok: false,
@@ -519,12 +520,10 @@ export class UserHub extends DurableObject<Env> {
 			this.pending.set(id, { ws: socket, resolve, timer, lostError });
 			socket.send(JSON.stringify({ type: "request", id, op, params }));
 		});
-		// 旧 CLI 对未知操作返回成功响应，但没有 result。
-		if (usesDelegation && result.ok && result.result === undefined) {
+		if (result.ok && result.result === undefined) {
 			return {
 				ok: false,
-				error:
-					"这台电脑的 pi-bridge 版本不支持此操作。请在电脑上运行 pi-bridge update 后重试。",
+				error: "这台电脑未返回操作结果。请运行 pi-bridge update 后重试。",
 			};
 		}
 		return result;

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -224,6 +230,53 @@ export async function checkDelegation(
 		assert.ok(independent.delegationId);
 		assert.notEqual(independent.delegationId, read.delegationId);
 		assert.equal(independent.output, "turns=1;model=primary;seenFirst=false");
+
+		const list = (sessionId: string, limit: number) =>
+			send<Ops["list_delegations"]["result"]>("list_delegations", {
+				sessionId,
+				limit,
+			});
+		const recent = await list(session.sessionId, 5);
+		assert.deepEqual(
+			recent.map(({ delegationId, preview }) => ({ delegationId, preview })),
+			[
+				{
+					delegationId: independent.delegationId,
+					preview: "Independent check",
+				},
+				{ delegationId: read.delegationId, preview: "Read the fixture" },
+			],
+		);
+		assert.deepEqual(await list(session.sessionId, 1), recent.slice(0, 1));
+		assert.deepEqual(await list(opened.sessionId, 5), []);
+		const restored = await run(
+			"restored",
+			session.sessionId,
+			"Follow up after lookup",
+			{
+				delegationId: recent[1]?.delegationId,
+			},
+		);
+		assert.equal(restored.output, "turns=5;model=primary;seenFirst=true");
+		assert.equal(
+			(await list(session.sessionId, 1))[0]?.delegationId,
+			read.delegationId,
+		);
+
+		const alias = join(process.cwd(), "delegated-alias");
+		symlinkSync(cwd, alias, "junction");
+		const aliasSession = await send<Ops["open_session"]["result"]>(
+			"open_session",
+			{
+				cwd: alias,
+			},
+		);
+		rmSync(alias);
+		symlinkSync(process.cwd(), alias, "junction");
+		assert.equal(
+			(await list(aliasSession.sessionId, 1))[0]?.delegationId,
+			read.delegationId,
+		);
 
 		// 跨目录会话或不存在的 delegationId 直接前置失败
 		await assert.rejects(

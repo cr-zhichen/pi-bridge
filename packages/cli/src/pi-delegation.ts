@@ -2,10 +2,12 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import {
+	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
-	realpathSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -13,6 +15,7 @@ import { createInterface } from "node:readline";
 import { stripVTControlCharacters } from "node:util";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type {
+	DelegationSummary,
 	ModelSelection,
 	ThinkingLevel,
 } from "../../server/src/protocol.ts";
@@ -44,6 +47,13 @@ type AssistantReply = Extract<
 
 const SESSION_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const STOP_GRACE_MS = 2_000;
+const TASK_PREFIX = "请执行以下委派任务。\n\n";
+const PREVIEW_LENGTH = 120;
+
+function projectDelegations(cwd: string): string {
+	const project = createHash("sha256").update(cwd).digest("hex");
+	return join(DATA_DIR, "delegations", project);
+}
 
 export function delegationHistory(
 	sdk: PiSdk["sdk"],
@@ -53,15 +63,60 @@ export function delegationHistory(
 	if (id !== undefined && !SESSION_ID.test(id)) {
 		throw new Error("委派会话不存在，请省略 delegation_id 开启新任务。");
 	}
-	const directory = realpathSync(cwd);
-	const project = createHash("sha256").update(directory).digest("hex");
 	const sessionId = id ?? randomUUID();
-	const dir = join(DATA_DIR, "delegations", project, sessionId);
-	const file = id ? sdk.SessionManager.findById(directory, id, dir) : undefined;
+	const dir = join(projectDelegations(cwd), sessionId);
+	const file = id ? sdk.SessionManager.findById(cwd, id, dir) : undefined;
 	if (id && !file) {
 		throw new Error("委派会话在当前目录不存在，请使用原目录或开启新任务。");
 	}
-	return { id: sessionId, dir, cwd: directory, file };
+	return { id: sessionId, dir, cwd, file };
+}
+
+export async function listDelegations(
+	sdk: PiSdk["sdk"],
+	cwd: string,
+	limit: number,
+): Promise<DelegationSummary[]> {
+	const project = projectDelegations(cwd);
+	if (!existsSync(project)) {
+		return [];
+	}
+	const candidates = readdirSync(project, { withFileTypes: true }).flatMap(
+		(entry) => {
+			if (!entry.isDirectory() || !SESSION_ID.test(entry.name)) {
+				return [];
+			}
+			const dir = join(project, entry.name);
+			const file = sdk.SessionManager.findById(cwd, entry.name, dir);
+			return file
+				? [{ delegationId: entry.name, dir, updatedAt: statSync(file).mtimeMs }]
+				: [];
+		},
+	);
+	// 只为需要返回的会话读取任务摘要，避免加载此目录的全部对话。
+	const recent = candidates
+		.sort((a, b) => b.updatedAt - a.updatedAt)
+		.slice(0, limit);
+	const summaries = await Promise.all(
+		recent.map(async ({ delegationId, dir, updatedAt }) => {
+			const sessions = await sdk.SessionManager.list(cwd, dir);
+			const session = sessions.find((entry) => entry.id === delegationId);
+			if (!session) return undefined;
+			const message = session.firstMessage.startsWith(TASK_PREFIX)
+				? session.firstMessage.slice(TASK_PREFIX.length)
+				: session.firstMessage;
+			const text = stripVTControlCharacters(message)
+				.replace(/\s+/g, " ")
+				.trim();
+			const characters = Array.from(text);
+			const preview =
+				characters.length > PREVIEW_LENGTH
+					? `${characters.slice(0, PREVIEW_LENGTH).join("")}…`
+					: text;
+			return { delegationId, updatedAt, preview };
+		}),
+	);
+	return summaries.filter((summary) => summary !== undefined);
 }
 
 export function saveDelegationSelection(
@@ -184,7 +239,7 @@ export async function runPiDelegation(
 			throw error;
 		}
 		// 通过 stdin 传入普通提示，避免将任务文本识别为命令行参数或扩展命令。
-		child.stdin.end(`请执行以下委派任务。\n\n${options.task}`);
+		child.stdin.end(TASK_PREFIX + options.task);
 		const [code, exitSignal] = await closed;
 		return delegationResult(reply, {
 			cancelled: signal.aborted,
