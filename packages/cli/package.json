@@ -1,6 +1,6 @@
 {
 	"name": "@zgccrui/pi-bridge",
-	"version": "0.11.0",
+	"version": "0.12.0",
 	"description": "让网页版 AI 调用本机 Pi 的工具、Skills 和 MCP",
 	"license": "MIT",
 	"homepage": "https://github.com/cr-zhichen/pi-bridge#readme",
