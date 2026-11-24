@@ -198,22 +198,22 @@ export const PAGE_STYLE = `
 
 	/* 登录、授权这类单页：不套卡片，品牌和表单排成一列放在页面中间，项目链接放在页面底部 */
 	.auth-page { min-height: 100vh; min-height: 100svh; display: grid; grid-template-rows: 1fr auto; }
-	.auth { width: 100%; max-width: 408px; margin: 0 auto; padding: 48px 24px 72px; align-self: center; }
+	.auth { width: 100%; max-width: 408px; margin: 0 auto; padding: 36px 24px 48px; align-self: center; }
 	.auth.consent { max-width: 432px; }
-	.auth .brand { margin-bottom: 40px; }
-	.auth h1 { font-size: 26px; line-height: 1.3; }
-	.auth .lead { margin: 8px 0 32px; }
-	.auth .field + .field { margin-top: 20px; }
-	.auth .label { margin-bottom: 8px; font-size: 13px; color: var(--text); }
-	.auth .input { height: 44px; padding: 0 14px; }
-	.auth-submit { display: block; height: 44px; margin-top: 28px; }
+	.auth .brand { margin-bottom: 24px; }
+	.auth h1 { font-size: 24px; line-height: 1.3; }
+	.auth .lead { margin: 6px 0 24px; }
+	.auth .field + .field { margin-top: 16px; }
+	.auth .label { margin-bottom: 6px; font-size: 13px; color: var(--text); }
+	.auth .input { height: 42px; padding: 0 12px; }
+	.auth-submit { display: block; height: 42px; margin-top: 22px; }
 	.auth-foot { display: flex; justify-content: center; padding: 0 24px 24px; font-size: 13px; }
 	.repo-link { display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }
 	.auth-hint { margin: 16px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
 	h1 { margin: 0; font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
 	.lead { margin: 6px 0 24px; color: var(--muted); }
 	.lead code { padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--text); font-size: .9em; }
-	.context { display: flex; gap: 8px; align-items: center; margin: -16px 0 32px; color: var(--muted); font-size: 13px; }
+	.context { display: flex; gap: 8px; align-items: center; margin: -12px 0 20px; color: var(--muted); font-size: 13px; }
 	.context svg { flex: none; }
 
 	.perms { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 8px; font-size: 13px; color: var(--muted); }

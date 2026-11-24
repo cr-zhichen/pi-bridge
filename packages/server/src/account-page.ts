@@ -62,7 +62,7 @@ ${PAGE_HEAD}
 	.link-strong { color: var(--text); font-weight: 500; }
 	.link-strong:hover { opacity: .78; }
 	.email-actions { display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 22px; }
-	.auth-sep { color: var(--border-strong); user-select: none; }
+	.auth-sep { color: color-mix(in srgb, var(--muted) 55%, transparent); user-select: none; }
 	.email-target { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
 	.input-code { font-family: var(--mono); font-size: 16px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; }
 	.input-code::placeholder { font-family: var(--font); font-size: 14px; font-weight: 400; letter-spacing: normal; text-transform: none; color: var(--muted); }
