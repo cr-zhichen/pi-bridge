@@ -23,19 +23,33 @@ pi-bridge 让 Claude、ChatGPT 和 Gemini 网页版使用你电脑上的 [Pi](ht
 
 按页面提示连接 GitHub 并填写 `ADMIN_KEY`，Cloudflare 会在你的 GitHub 账号下创建一个独立仓库并完成部署。这个仓库不会随上游自动更新，后续升级需要手动合并改动。
 
-| 配置项      | 作用                                               | 默认值       |
-| ----------- | -------------------------------------------------- | ------------ |
-| `ADMIN_KEY` | 登录管理页 `/admin` 的密钥，请设置足够长的随机字符 | 无，必须设置 |
+| 配置项               | 作用                                               | 默认值       |
+| -------------------- | -------------------------------------------------- | ------------ |
+| `ADMIN_KEY`          | 登录管理页 `/admin` 的密钥，请设置足够长的随机字符 | 无，必须设置 |
+| `EMAIL_FROM`         | 发件地址，留空时关闭邮件功能                       | 空           |
+| `ALLOW_REGISTRATION` | 设为 `true` 开放自助注册，需要先设置 `EMAIL_FROM`  | `false`      |
 
 ### 临时文件
 
 pi-bridge 支持在对话中把本机文件上传为临时下载链接（最大 50 MB，24 小时后自动失效）。部署后，建议在 Worker 的 **Bindings** 找到自动创建的 R2 存储桶 `TRANSFER_FILES`，保持存储桶私有，并[设置对象生命周期规则](https://developers.cloudflare.com/r2/buckets/object-lifecycles/#dashboard)，将前缀 `transfers/` 下的对象设为 1 天后删除，避免过期文件占用空间。
 
-### 创建用户
+### 用户注册
 
-部署完成后，在浏览器打开 `https://<服务地址>/admin`（`<服务地址>` 为 Worker 的访问地址，例如 `*.workers.dev` 或自定义域名），用 `ADMIN_KEY` 登录，为每位使用者（包括你自己）创建用户。创建后页面会显示登录地址、用户名和初始密码，只显示一次。用户忘记密码时，在管理页重置密码。
+向任意收件人发信需要 Workers Paid。
+
+1. 在 Cloudflare 启用 [Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/) 并验证发信域名。
+2. 取消 `packages/server/wrangler.jsonc` 中 `send_email` 的注释并重新部署。
+3. 在 Worker 的 **Settings → Variables and Secrets** 中设置 `EMAIL_FROM`。
+
+设为 `ALLOW_REGISTRATION=true` 后，使用者可在登录页点击「注册账号」，验证邮箱后登录。已有账号的用户可在账号页绑定邮箱。绑定后可用邮箱登录，也可从登录页找回密码。
+
+### 手动创建用户
+
+部署完成后，在浏览器打开 `https://<服务地址>/admin`（`<服务地址>` 为 Worker 的访问地址，例如 `*.workers.dev` 或自定义域名），用 `ADMIN_KEY` 登录，填写用户名创建用户，邮箱可选。创建后页面会显示登录地址、用户名和初始密码，只显示一次。管理员可在用户列表修改或解除邮箱绑定，也可为用户重置密码。
 
 用户打开 `https://<服务地址>` 登录并修改初始密码（至少 10 位）后，会进入账号页，之后在账号页自行添加电脑、连接网页版 AI。管理员看不到用户的密钥。
+
+停止为某个用户提供服务时，可在管理页选择「删除用户」。此操作无法恢复，用户的设备连接、授权和临时文件链接会失效。
 
 ## 连接电脑
 

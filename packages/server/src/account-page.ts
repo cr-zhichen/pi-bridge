@@ -1,4 +1,9 @@
 import {
+	EMAIL_ACCOUNT_MODAL,
+	EMAIL_ACCOUNT_SCRIPT,
+	EMAIL_AUTH_VIEWS,
+} from "./account-email-page.ts";
+import {
 	BRAND,
 	PAGE_HEAD,
 	PAGE_SCRIPT,
@@ -11,7 +16,7 @@ const PASSWORD_FIELDS = `
 				<div class="field"><span class="label">新密码</span><input class="input" name="next" type="password" placeholder="至少 10 位" autocomplete="new-password" minlength="10" required></div>
 				<div class="field"><span class="label">确认新密码</span><input class="input" name="confirm" type="password" autocomplete="new-password" minlength="10" required></div>`;
 
-/** /login 和 /account 共用这个页面：登录、修改初始密码、账号页三个视图。 */
+/** /login 和 /account 共用这个页面：登录、注册、找回密码与账号页。 */
 export const ACCOUNT_PAGE = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -52,7 +57,25 @@ ${PAGE_HEAD}
 	@media (prefers-reduced-motion: reduce) {
 		.switch, .switch[data-tip]::before, .switch[data-tip]::after, .switch input, .switch input::before { transition: none; }
 	}
-	.advanced-body > .card + .card { margin-top: 0; }
+	.field { display: block; }
+	.link:disabled { opacity: .5; cursor: not-allowed; }
+	.link-strong { color: var(--text); font-weight: 500; }
+	.link-strong:hover { opacity: .78; }
+	.email-actions { display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 22px; }
+	.auth-sep { color: var(--border-strong); user-select: none; }
+	.email-target { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+	.input-code { font-family: var(--mono); font-size: 16px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; }
+	.input-code::placeholder { font-family: var(--font); font-size: 14px; font-weight: 400; letter-spacing: normal; text-transform: none; color: var(--muted); }
+	.email-step-note { margin: 0 0 16px; font-size: 13px; color: var(--muted); line-height: 1.55; }
+	.email-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px;
+		border-top: 1px solid var(--border); }
+	.email-row-main { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text); }
+	.email-row-main svg { flex: none; color: var(--muted); }
+	#verified-email-address { font-weight: 500; overflow-wrap: anywhere; }
+	.modal-links { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+	.url-keys-list .list-head { padding: 4px 0 10px; }
+	.url-keys-list .row { padding: 12px 0; }
+	.url-keys-list:not([hidden]) + .url-key-form { padding-top: 16px; border-top: 1px solid var(--border); }
 	.connector-tabs { align-items: center; }
 	.connector-tabs .tab { display: inline-flex; align-items: center; white-space: nowrap; }
 	.connector-tabs .tab-prompt { margin-left: auto; gap: 6px; }
@@ -66,10 +89,12 @@ ${PAGE_HEAD}
 		border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.6; color: var(--text); }
 	.connector-prompt p { margin: 0; overflow-wrap: anywhere; }
 	.connector-prompt .prompt-url { font-family: var(--mono); font-size: 12.5px; }
-	.url-key-form { box-shadow: none; padding: 16px; display: grid; gap: 16px; }
+	.url-key-form { display: grid; gap: 16px; }
 	.url-key-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
 		padding-top: 14px; border-top: 1px solid var(--border); }
 	@media (max-width: 640px) {
+		.top .user { gap: 12px; }
+		.modal-foot:has(.modal-links) { flex-wrap: wrap; }
 		#devices .row-actions:has(.switch) { flex-basis: 100%; justify-content: space-between; padding-left: 22px; }
 		#devices .row-divider { display: none; }
 		.switch[data-tip]::before { left: 34px; right: auto; }
@@ -95,16 +120,23 @@ ${PAGE_HEAD}
 		<form id="login-form">
 			${BRAND}
 			<h1>登录</h1>
-			<p class="lead">使用管理员为你创建的账号</p>
+			<p class="lead">登录你的 pi-bridge 账号</p>
 			<div id="login-context" class="context" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>登录后继续授权应用</span></div>
-			<div class="field"><label class="label" for="username">用户名</label><input class="input" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+			<div class="field"><label class="label" for="identifier">用户名或邮箱</label><input class="input" id="identifier" maxlength="254" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
 			<div class="field"><label class="label" for="password">密码</label><input class="input" id="password" type="password" autocomplete="current-password" required></div>
 			<button class="btn primary wide auth-submit">登录</button>
-			<p class="auth-hint">忘记密码请联系管理员重置</p>
+			<p class="auth-hint email-actions">
+				<button class="link" type="button" id="start-register" data-auth-view="register" hidden>注册账号</button>
+				<span class="auth-sep" id="login-action-sep" aria-hidden="true" hidden>·</span>
+				<button class="link" type="button" id="start-reset" data-auth-view="reset" hidden>找回密码</button>
+				<span id="contact-admin" hidden>忘记密码请联系管理员重置</span>
+			</p>
 		</form>
 	</main>
 	<footer class="auth-foot">${PROJECT_TEXT_LINK}</footer>
 </div>
+
+${EMAIL_AUTH_VIEWS}
 
 <div id="view-first" class="auth-page" hidden>
 	<main class="auth">
@@ -123,6 +155,7 @@ ${PAGE_HEAD}
 		${BRAND}
 		<div class="user">
 			<span id="whoami" class="name"></span>
+			<button class="link" id="open-email" hidden>绑定邮箱</button>
 			<button class="link" id="open-password">修改密码</button>
 			<button class="link logout">退出</button>
 			${PROJECT_ICON_LINK}
@@ -199,8 +232,8 @@ ${PAGE_HEAD}
 				<summary>不支持 OAuth？使用带密钥的地址</summary>
 				<div class="advanced-body">
 					<div class="risk"><strong>请妥善保管地址。</strong>拿到它就能在所选电脑上执行命令。</div>
-					<div class="card list" id="url-keys" style="box-shadow:none" hidden></div>
-					<form id="url-key-form" class="card url-key-form">
+					<div class="url-keys-list" id="url-keys" hidden></div>
+					<form id="url-key-form" class="url-key-form">
 						<div class="field"><label class="label" for="url-key-name">名称</label><input class="input" id="url-key-name" placeholder="例如：公司内部工具" maxlength="64" autocomplete="off" required></div>
 						<fieldset class="device-choice">
 							<legend class="sr-only">允许访问的电脑</legend>
@@ -256,6 +289,8 @@ ${PAGE_HEAD}
 		</div>
 	</div>
 </dialog>
+
+${EMAIL_ACCOUNT_MODAL}
 
 <dialog class="modal narrow" id="modal-password" aria-labelledby="password-title">
 	<form class="modal-body password-form" id="password-form">
@@ -327,7 +362,7 @@ async function api(path, body) {
 }
 
 function show(view) {
-	for (const name of ["login", "first", "account"]) $("view-" + name).hidden = name !== view;
+	for (const name of ["login", "register", "reset", "first", "account"]) $("view-" + name).hidden = name !== view;
 }
 
 function badge(text, kind) {
@@ -608,7 +643,10 @@ async function load() {
 		return;
 	}
 	const { user } = me;
-	$("whoami").textContent = user.name === user.username ? user.username : user.name + " · " + user.username;
+	$("open-email").hidden = !me.emailAvailable && !user.email;
+	$("open-email").textContent = user.email ? "账号邮箱" : "绑定邮箱";
+	$("open-email").title = user.email ?? "";
+	$("whoami").textContent = user.username;
 	renderLegacy();
 	renderApps();
 	renderUrlKeys();
@@ -667,7 +705,7 @@ $("login-form").onsubmit = async (event) => {
 	const submit = event.submitter;
 	submit.disabled = true;
 	try {
-		await api("login", { username: $("username").value, password: $("password").value });
+		await api("login", { identifier: $("identifier").value, password: $("password").value });
 		location.replace(next || "/account");
 	} catch (error) {
 		toast(error.message, true);
@@ -813,7 +851,10 @@ $("modal-add").addEventListener("close", () => {
 	load().catch((error) => toast(error.message, true));
 });
 
+${EMAIL_ACCOUNT_SCRIPT}
+
 if (isLoginPage) {
+	api("auth/options").then(showLoginOptions, () => { $("contact-admin").hidden = false; });
 	$("login-context").hidden = !next.startsWith("/authorize");
 	// 已经登录时直接跳转
 	fetch("/api/me").then((res) => {

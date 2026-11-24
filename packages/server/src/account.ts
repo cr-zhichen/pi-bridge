@@ -1,5 +1,7 @@
+import { emailFeatures, handleAccountEmail } from "./account-email.ts";
 import { ACCOUNT_PAGE } from "./account-page.ts";
 import { handleAuthorize } from "./authorize.ts";
+import { normalizeEmail } from "./email-challenges.ts";
 import { jsonError, notFound, readJson } from "./http.ts";
 import { isLegacyApp, listApps, listGrants, revokeApp } from "./oauth.ts";
 import { htmlResponse } from "./page.ts";
@@ -33,12 +35,14 @@ export const ACCOUNT_ROUTES = new Set([
 ]);
 
 /**
- * 用户的账号页，使用管理员分配的用户名和密码登录：
+ * 用户的账号页，使用用户名或邮箱和密码登录：
  * - GET  /login                       登录页，登录后跳到 ?next= 指定的站内地址，默认 /account
  * - POST /logout                      表单退出（授权页的「切换账号」），然后回到登录页
  * - GET  /account                     账号页
  * - GET|POST /authorize               OAuth 授权确认（authorize.ts）
- * - POST /api/login                   { username, password }
+ * - POST /api/login                   { identifier, password }
+ * - GET  /api/auth/options           邮箱和开放注册状态
+ * - POST /api/email/<register|bind|reset>/<start|resend|finish>
  * - POST /api/logout
  * - GET  /api/me                      当前用户、电脑、密钥和已授权的应用
  * - POST /api/me/password             { current, next }
@@ -55,6 +59,7 @@ export async function handleAccount(
 	request: Request,
 	env: Env,
 	parts: string[],
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	const registry = registryOf(env);
 	const [first, ...rest] = parts;
@@ -102,6 +107,26 @@ export async function handleAccount(
 	}
 
 	const path = rest.join("/");
+	if (path === "auth/options" && request.method === "GET") {
+		return Response.json(emailFeatures(env));
+	}
+	const [resource, purpose, emailAction] = rest;
+	if (
+		request.method === "POST" &&
+		resource === "email" &&
+		rest.length === 3 &&
+		emailAction &&
+		(purpose === "register" || purpose === "bind" || purpose === "reset")
+	) {
+		return handleAccountEmail(
+			request,
+			env,
+			ctx,
+			registry,
+			purpose,
+			emailAction,
+		);
+	}
 	if (path === "login" && request.method === "POST") {
 		return login(request, registry);
 	}
@@ -125,7 +150,13 @@ export async function handleAccount(
 
 	if (path === "me" && request.method === "GET") {
 		if (user.mustChangePassword) {
-			return Response.json({ user, keys: [], devices: [], apps: [] });
+			return Response.json({
+				user,
+				keys: [],
+				devices: [],
+				apps: [],
+				...emailFeatures(env),
+			});
 		}
 		const [keys, devices, access] = await Promise.all([
 			registry.listKeys(user.id),
@@ -135,6 +166,7 @@ export async function handleAccount(
 		const apps = await listApps(env, user.id, access);
 		return Response.json({
 			user,
+			...emailFeatures(env),
 			keys: keys.map((key) => ({
 				...key,
 				deviceAccess:
@@ -254,24 +286,39 @@ async function login(
 	registry: RegistryStub,
 ): Promise<Response> {
 	const body = await readJson(request);
-	const username = normalizeUsername(body.username);
+	const identifier =
+		typeof body.identifier === "string" && body.identifier.includes("@")
+			? normalizeEmail(body.identifier)
+			: normalizeUsername(body.identifier);
+	const error = "登录失败，请检查账号和密码或稍后重试";
 	const password = typeof body.password === "string" ? body.password : "";
-	if (!username || !password || password.length > MAX_PASSWORD_LENGTH) {
-		return jsonError("用户名或密码不正确", 401);
+	if (
+		!identifier ||
+		identifier.length > 254 ||
+		!password ||
+		password.length > MAX_PASSWORD_LENGTH
+	) {
+		return jsonError(error, 401);
 	}
 	const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-	const check = await registry.beginLogin(username, ip);
-	if (check.limited) {
-		return jsonError("登录失败次数过多，请 15 分钟后再试", 429);
+	const check = await registry.beginLogin(identifier, ip);
+	if (check.limited === "ip") {
+		return jsonError("登录失败次数过多，请稍后重试", 429);
 	}
-	const ok = check.user
-		? await verifyPassword(password, check.user.passwordHash)
+	const user = check.limited ? null : check.user;
+	const ok = user
+		? await verifyPassword(password, user.passwordHash)
 		: await verifyDummy(password);
-	if (!ok || !check.user) {
-		await registry.recordLoginFailure(username, ip);
-		return jsonError("用户名或密码不正确", 401);
+	if (!ok || !user) {
+		await registry.recordLoginFailure(check.attemptKey, ip);
+		return jsonError(error, 401);
 	}
-	const token = await registry.createSession(check.user.id, username);
+	const token = await registry.createSession(
+		user.id,
+		identifier,
+		user.passwordHash,
+	);
+	if (!token) return jsonError(error, 401);
 	return Response.json(
 		{},
 		{ headers: { "Set-Cookie": sessionCookie(token, SESSION_TTL_MS / 1000) } },
@@ -300,11 +347,11 @@ async function changePassword(
 	if (current === next) {
 		return jsonError("新密码不能与当前密码相同");
 	}
-	await registry.setPassword(
+	const changed = await registry.setPassword(
 		session.user.id,
 		await hashPassword(next),
 		false,
-		session.hash,
+		{ sessionHash: session.hash, passwordHash: stored },
 	);
-	return Response.json({});
+	return changed ? Response.json({}) : jsonError("请重新登录后再修改密码", 401);
 }

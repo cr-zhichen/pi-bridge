@@ -1,5 +1,5 @@
 import { jsonError, notFound } from "./http.ts";
-import { hashToken, newToken, randomId, toHex } from "./stubs.ts";
+import { hashToken, newToken, randomId, registryOf, toHex } from "./stubs.ts";
 
 const TRANSFER_MAX_BYTES = 50_000_000;
 export const TRANSFER_ID_PATTERN = /^[a-f0-9]{32}$/;
@@ -79,7 +79,7 @@ export async function expireFile(
 
 export async function handleTransfer(
 	request: Request,
-	bucket: R2Bucket,
+	env: Env,
 	url: URL,
 	fileId: string,
 ): Promise<Response> {
@@ -88,9 +88,9 @@ export async function handleTransfer(
 	}
 	switch (request.method) {
 		case "PUT":
-			return upload(request, bucket, url.origin, fileId);
+			return upload(request, env, url.origin, fileId);
 		case "GET":
-			return download(bucket, url, fileId);
+			return download(env, url, fileId);
 		default:
 			return new Response(null, {
 				status: 405,
@@ -101,7 +101,7 @@ export async function handleTransfer(
 
 async function upload(
 	request: Request,
-	bucket: R2Bucket,
+	env: Env,
 	origin: string,
 	fileId: string,
 ): Promise<Response> {
@@ -112,6 +112,7 @@ async function upload(
 		return jsonError("请提供上传令牌", 401);
 	}
 	const key = objectKey(fileId);
+	const bucket = env.TRANSFER_FILES;
 	const slot = await bucket.head(key);
 	const { userId, fileName, tokenHash } = slot?.customMetadata ?? {};
 	if (
@@ -120,7 +121,8 @@ async function upload(
 		!fileName ||
 		!tokenHash ||
 		slot.uploaded.getTime() + TOKEN_TTL_MS <= Date.now() ||
-		(await hashToken(token)) !== tokenHash
+		(await hashToken(token)) !== tokenHash ||
+		!(await registryOf(env).isRetainedUser(userId))
 	) {
 		return jsonError("上传令牌无效、已使用或已过期，请重新申请上传", 403);
 	}
@@ -190,11 +192,7 @@ async function downloadLink(
 	};
 }
 
-async function download(
-	bucket: R2Bucket,
-	url: URL,
-	fileId: string,
-): Promise<Response> {
+async function download(env: Env, url: URL, fileId: string): Promise<Response> {
 	const expires = url.searchParams.get("expires");
 	const signature = url.searchParams.get("signature");
 	if (
@@ -207,16 +205,19 @@ async function download(
 		return notFound();
 	}
 	const key = objectKey(fileId);
+	const bucket = env.TRANSFER_FILES;
 	const meta = await bucket.head(key);
-	const secret = meta?.customMetadata?.downloadSecret;
+	const { userId, downloadSecret: secret } = meta?.customMetadata ?? {};
 	if (
 		!meta ||
+		!userId ||
 		!secret ||
 		fileExpiresAt(meta) <= Date.now() ||
 		!crypto.subtle.timingSafeEqual(
 			encoder.encode(signature),
 			encoder.encode(await signDownload(secret, expires)),
-		)
+		) ||
+		!(await registryOf(env).isRetainedUser(userId))
 	) {
 		return notFound();
 	}

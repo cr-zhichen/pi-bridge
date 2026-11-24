@@ -1,4 +1,6 @@
-import { ADMIN_PAGE } from "./admin-page.ts";
+import { emailFeatures } from "./account-email.ts";
+import { adminPage } from "./admin-page.ts";
+import { normalizeEmail } from "./email-challenges.ts";
 import { jsonError, notFound, readJson } from "./http.ts";
 import { listGrants, revokeAllGrants } from "./oauth.ts";
 import { htmlResponse } from "./page.ts";
@@ -8,12 +10,13 @@ import { hubOf, registryOf } from "./stubs.ts";
 
 /**
  * - GET  /admin                                管理页
- * - GET  /admin/api/users                      用户及其设备
- * - POST /admin/api/users                      创建用户 { username, name? }，返回初始密码
+ * - GET  /admin/api/users?page=1&q=...         分页搜索用户名与邮箱
+ * - POST /admin/api/users                      创建用户 { username, email? }，返回初始密码
  * - POST /admin/api/users/<id>/account         为老用户设置登录账号 { username }，返回初始密码
+ * - POST /admin/api/users/<id>/email           设置或解除邮箱 { email: string | null }
  * - POST /admin/api/users/<id>/reset-password  重置密码，返回新密码
  * - POST /admin/api/users/<id>/disable|enable  禁用或启用
- * - POST /admin/api/users/<id>/revoke-access   吊销该用户的所有密钥和 OAuth 授权
+ * - POST /admin/api/users/<id>/delete         删除用户 { confirm: true }
  *
  * 接口使用 Authorization: Bearer <ADMIN_KEY>。管理员看不到也不能生成用户的密钥。
  */
@@ -23,7 +26,7 @@ export async function handleAdmin(
 	parts: string[],
 ): Promise<Response> {
 	if (parts.length === 0 && request.method === "GET") {
-		return htmlResponse(ADMIN_PAGE);
+		return htmlResponse(adminPage(emailFeatures(env).emailAvailable));
 	}
 	if (parts[0] !== "api" || parts[1] !== "users") {
 		return notFound();
@@ -42,7 +45,14 @@ export async function handleAdmin(
 	const [, , id, action] = parts;
 
 	if (!id && request.method === "GET") {
-		const users = await registry.listUsers();
+		const { searchParams } = new URL(request.url);
+		const page = Number(searchParams.get("page") ?? 1);
+		if (!Number.isSafeInteger(page) || page < 1) {
+			return jsonError("页码无效");
+		}
+		const query = (searchParams.get("q") ?? "").trim().toLowerCase();
+		if (query.length > 254) return jsonError("搜索内容过长");
+		const { users, ...pagination } = await registry.listUsers(page, query);
 		const detailed = await Promise.all(
 			users.map(async (user) => {
 				const [devices, grants] = await Promise.all([
@@ -52,7 +62,7 @@ export async function handleAdmin(
 				return { ...user, devices, appCount: grants.length };
 			}),
 		);
-		return Response.json(detailed);
+		return Response.json({ ...pagination, users: detailed });
 	}
 	if (!id && request.method === "POST") {
 		const body = await readJson(request);
@@ -61,15 +71,15 @@ export async function handleAdmin(
 		if (problem) {
 			return jsonError(problem);
 		}
-		const name =
-			(typeof body.name === "string" ? body.name.trim() : "").slice(0, 64) ||
-			username;
+		const email = body.email == null ? null : normalizeEmail(body.email);
+		if (email === "") return jsonError("请输入有效的邮箱地址");
 		const password = newPassword();
-		const result = await registry.createUser(
+		const result = await registry.createUser({
 			username,
-			name,
-			await hashPassword(password),
-		);
+			email,
+			passwordHash: await hashPassword(password),
+			mustChangePassword: true,
+		});
 		return result.ok
 			? Response.json({ user: result.user, password })
 			: jsonError(result.error);
@@ -97,6 +107,13 @@ export async function handleAdmin(
 					? Response.json({ username, password })
 					: jsonError(result.error);
 			}
+			case "email": {
+				const { email: input } = await readJson(request);
+				const email = input === null ? null : normalizeEmail(input);
+				if (email === "") return jsonError("请输入有效的邮箱地址");
+				const result = await registry.setEmail(id, email);
+				return result.ok ? Response.json({}) : jsonError(result.error);
+			}
 			case "reset-password": {
 				const password = newPassword();
 				const found = await registry.setPassword(
@@ -108,17 +125,30 @@ export async function handleAdmin(
 					? Response.json({ password })
 					: jsonError("用户不存在或还没有登录账号", 404);
 			}
-			case "revoke-access": {
-				const found = await registry.revokeAllKeys(id);
-				if (!found) {
-					return userNotFound();
-				}
-				await revokeAllGrants(env, id);
-				return Response.json({});
+			case "delete": {
+				const { confirm } = await readJson(request);
+				if (confirm !== true) return jsonError("请确认删除用户");
+				return deleteUser(env, id);
 			}
 		}
 	}
 	return notFound();
+}
+
+async function deleteUser(env: Env, id: string): Promise<Response> {
+	const registry = registryOf(env);
+	try {
+		if (!(await registry.beginDeleteUser(id))) return userNotFound();
+		const hub = hubOf(env, id);
+		await hub.revoke();
+		await revokeAllGrants(env, id);
+		await hub.deleteAccount();
+		await registry.finishDeleteUser(id);
+		return Response.json({});
+	} catch {
+		console.error("pi-bridge 无法完成用户删除", id);
+		return jsonError("用户删除未完成，请重新尝试", 503);
+	}
 }
 
 async function isAdmin(request: Request, env: Env): Promise<boolean> {

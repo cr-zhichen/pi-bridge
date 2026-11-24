@@ -418,11 +418,19 @@ export class UserHub extends DurableObject<Env> {
 		);
 	}
 
-	/** 用户被禁用或所有密钥被吊销时断开所有设备。 */
+	/** 禁用或删除用户时断开所有设备。 */
 	revoke(): void {
 		for (const ws of this.ctx.getWebSockets()) {
 			ws.close(CLOSE_REVOKED, "revoked");
 		}
+	}
+
+	deleteAccount(): void {
+		this.revoke();
+		this.ctx.storage.transactionSync(() => {
+			this.sql.exec("DELETE FROM devices");
+			this.sql.exec("DELETE FROM connector_access");
+		});
 	}
 
 	/** 密钥被吊销时只断开用它连接的设备。 */
@@ -431,16 +439,6 @@ export class UserHub extends DurableObject<Env> {
 		for (const ws of this.ctx.getWebSockets(keyTag(keyId))) {
 			ws.close(CLOSE_REVOKED, "revoked");
 		}
-	}
-
-	revokeAllKeys(keyIds: string[]): void {
-		this.sql.exec(
-			`INSERT INTO connector_access (id, mode, device_ids)
-			SELECT value, 'revoked', '[]' FROM json_each(?) WHERE true
-			ON CONFLICT (id) DO UPDATE SET mode = excluded.mode, device_ids = excluded.device_ids`,
-			JSON.stringify(keyIds),
-		);
-		this.revoke();
 	}
 
 	/** 从设备列表中移除，仍连接着的话先断开。密钥由调用方吊销。 */

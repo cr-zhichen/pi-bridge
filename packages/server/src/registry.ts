@@ -1,4 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
+import {
+	EmailChallenges,
+	type EmailFlow,
+	type EmailPurpose,
+} from "./email-challenges.ts";
 import { hashToken, hubOf, newToken, randomId } from "./stubs.ts";
 
 /**
@@ -13,8 +18,9 @@ export interface User {
 	id: string;
 	/** 为空表示还没有设置登录账号（升级前创建的用户）。 */
 	username: string | null;
-	name: string;
+	email: string | null;
 	disabled: boolean;
+	deleting: boolean;
 	mustChangePassword: boolean;
 	createdAt: number;
 }
@@ -42,12 +48,14 @@ export const MAX_KEYS_PER_USER = 50;
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** 登录失败次数按这个时间窗口统计。 */
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const MAX_FAILURES_PER_USERNAME = 10;
+const MAX_FAILURES_PER_ACCOUNT = 10;
+const USERS_PER_PAGE = 10;
+const EMAIL_IN_USE = "该邮箱已被使用，请使用其他邮箱";
 const MAX_FAILURES_PER_IP = 20;
 /** 密钥的最后使用时间最多每分钟写一次，避免每个 MCP 请求都写库。 */
 const LAST_USED_RESOLUTION_MS = 60 * 1000;
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
 
 /** 用户名统一转为小写。 */
 export function normalizeUsername(value: unknown): string {
@@ -63,8 +71,9 @@ export function usernameProblem(username: string): string | undefined {
 type UserRow = {
 	id: string;
 	username: string | null;
-	name: string;
+	email: string | null;
 	disabled: number;
+	deleting: number;
 	must_change_password: number;
 	created_at: number;
 };
@@ -79,11 +88,12 @@ type KeyRow = {
 };
 
 const USER_COLUMNS =
-	"users.id, users.username, users.name, users.disabled, users.must_change_password, users.created_at";
+	"users.id, users.username, users.email, users.disabled, users.deleting, users.must_change_password, users.created_at";
 
 /** 全局唯一的实例，保存用户、密钥哈希和登录状态。 */
 export class Registry extends DurableObject<Env> {
 	sql = this.ctx.storage.sql;
+	private readonly emailChallenges = new EmailChallenges(this.sql);
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -205,36 +215,42 @@ export class Registry extends DurableObject<Env> {
 		return true;
 	}
 
-	/** 吊销用户的所有密钥，所有电脑会断开。 */
-	async revokeAllKeys(userId: string): Promise<boolean> {
-		if (!this.getUser(userId)) {
-			return false;
-		}
-		const keys = this.sql
-			.exec<{ id: string; scopes: string }>(
-				"DELETE FROM keys WHERE user_id = ? RETURNING id, scopes",
-				userId,
-			)
-			.toArray();
-		await hubOf(this.env, userId).revokeAllKeys(
-			keys
-				.filter((key) => parseScopes(key.scopes).includes("connector"))
-				.map((key) => key.id),
-		);
-		return true;
-	}
-
 	// 用户
 
-	listUsers(): (User & { keyCount: number })[] {
-		return this.sql
+	listUsers(
+		requestedPage: number,
+		query: string,
+	): {
+		users: (User & { keyCount: number })[];
+		total: number;
+		page: number;
+		pageCount: number;
+		pageSize: number;
+	} {
+		const filter = query
+			? "WHERE instr(users.username, ?) > 0 OR instr(users.email, ?) > 0"
+			: "";
+		const bindings = query ? [query, query] : [];
+		const { total } = this.sql
+			.exec<{ total: number }>(
+				`SELECT count(*) AS total FROM users ${filter}`,
+				...bindings,
+			)
+			.one();
+		const pageCount = Math.max(1, Math.ceil(total / USERS_PER_PAGE));
+		const page = Math.min(requestedPage, pageCount);
+		const users = this.sql
 			.exec<UserRow & { key_count: number }>(
 				`SELECT ${USER_COLUMNS},
 					(SELECT count(*) FROM keys WHERE keys.user_id = users.id) AS key_count
-				FROM users ORDER BY created_at`,
+				FROM users ${filter} ORDER BY created_at, id LIMIT ? OFFSET ?`,
+				...bindings,
+				USERS_PER_PAGE,
+				(page - 1) * USERS_PER_PAGE,
 			)
 			.toArray()
 			.map((row) => ({ ...toUser(row), keyCount: row.key_count }));
+		return { users, total, page, pageCount, pageSize: USERS_PER_PAGE };
 	}
 
 	getUser(id: string): User | null {
@@ -244,31 +260,82 @@ export class Registry extends DurableObject<Env> {
 		return row ? toUser(row) : null;
 	}
 
-	createUser(
-		username: string,
-		name: string,
-		passwordHash: string,
-	): Outcome<{ user: User }> {
+	createUser({
+		username,
+		email,
+		passwordHash,
+		mustChangePassword,
+	}: {
+		username: string;
+		email: string | null;
+		passwordHash: string;
+		mustChangePassword: boolean;
+	}): Outcome<{ user: User }> {
 		if (this.usernameTaken(username)) {
 			return { ok: false, error: `用户名「${username}」已被使用` };
+		}
+		if (email && this.userByEmail(email)) {
+			return { ok: false, error: EMAIL_IN_USE };
 		}
 		const user: User = {
 			id: randomId(8),
 			username,
-			name,
+			email,
 			disabled: false,
-			mustChangePassword: true,
+			deleting: false,
+			mustChangePassword,
 			createdAt: Date.now(),
 		};
 		this.sql.exec(
-			"INSERT INTO users (id, username, name, password_hash, must_change_password, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+			`INSERT INTO users (id, username, email, password_hash, must_change_password, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
 			user.id,
 			username,
-			name,
+			email,
 			passwordHash,
+			Number(user.mustChangePassword),
 			user.createdAt,
 		);
 		return { ok: true, user };
+	}
+
+	isRetainedUser(id: string): boolean {
+		return (
+			this.sql
+				.exec("SELECT 1 FROM users WHERE id = ? AND deleting = 0", id)
+				.toArray().length > 0
+		);
+	}
+
+	beginDeleteUser(id: string): boolean {
+		return this.ctx.storage.transactionSync(() => {
+			const { rowsWritten } = this.sql.exec(
+				"UPDATE users SET disabled = 1, deleting = 1 WHERE id = ?",
+				id,
+			);
+			if (rowsWritten)
+				this.sql.exec("DELETE FROM sessions WHERE user_id = ?", id);
+			return rowsWritten > 0;
+		});
+	}
+
+	finishDeleteUser(id: string): void {
+		this.ctx.storage.transactionSync(() => {
+			const user = this.getUser(id);
+			if (!user?.deleting) return;
+			this.emailChallenges.deleteUser(id, user.email);
+			this.sql.exec("DELETE FROM login_attempts WHERE key = ?", `user:${id}`);
+			this.sql.exec("DELETE FROM keys WHERE user_id = ?", id);
+			this.sql.exec("DELETE FROM app_usage WHERE user_id = ?", id);
+			this.sql.exec("DELETE FROM users WHERE id = ?", id);
+		});
+	}
+
+	private userByEmail(email: string): User | null {
+		const row = this.sql
+			.exec<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE email = ?`, email)
+			.toArray()[0];
+		return row ? toUser(row) : null;
 	}
 
 	/** 为升级前创建、还没有登录账号的用户设置用户名和初始密码。 */
@@ -280,6 +347,9 @@ export class Registry extends DurableObject<Env> {
 		const user = this.getUser(id);
 		if (!user) {
 			return { ok: false, error: "用户不存在" };
+		}
+		if (user.deleting) {
+			return { ok: false, error: "此用户正在删除" };
 		}
 		if (user.username) {
 			return { ok: false, error: "这位用户已经有登录账号" };
@@ -296,6 +366,29 @@ export class Registry extends DurableObject<Env> {
 		return { ok: true };
 	}
 
+	/** 管理员变更邮箱会作废已有的网页登录会话和待验证请求。 */
+	setEmail(id: string, email: string | null): Outcome<object> {
+		return this.ctx.storage.transactionSync(() => {
+			const user = this.getUser(id);
+			if (!user || user.deleting)
+				return { ok: false, error: "用户不存在或正在删除" };
+			if (!user.username) return { ok: false, error: "请先为用户设置登录账号" };
+			if (user.email === email) return { ok: true };
+			const result = this.updateBoundEmail(id, email);
+			if (result.ok)
+				this.sql.exec("DELETE FROM sessions WHERE user_id = ?", id);
+			return result;
+		});
+	}
+
+	private updateBoundEmail(id: string, email: string | null): Outcome<object> {
+		if (email && this.userByEmail(email))
+			return { ok: false, error: EMAIL_IN_USE };
+		this.sql.exec("UPDATE users SET email = ? WHERE id = ?", email, id);
+		this.emailChallenges.clearSensitiveFlows(id);
+		return { ok: true };
+	}
+
 	passwordHashOf(id: string): string | null {
 		return (
 			this.sql
@@ -309,32 +402,44 @@ export class Registry extends DurableObject<Env> {
 
 	/**
 	 * 设置新密码，并注销该用户的登录状态。
-	 * 用户自己修改密码时保留当前这次登录（keepSession），管理员重置时全部注销。
+	 * 用户自己改密时重新核验会话和密码哈希，只保留当前会话。
 	 */
 	setPassword(
 		id: string,
 		passwordHash: string,
 		mustChange: boolean,
-		keepSession?: string,
+		verified?: { sessionHash: string; passwordHash: string },
 	): boolean {
-		const { rowsWritten } = this.sql.exec(
-			"UPDATE users SET password_hash = ?, must_change_password = ? WHERE id = ? AND username IS NOT NULL",
-			passwordHash,
-			mustChange ? 1 : 0,
-			id,
-		);
-		this.sql.exec(
-			"DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
-			id,
-			keepSession ?? "",
-		);
-		return rowsWritten > 0;
+		return this.ctx.storage.transactionSync(() => {
+			if (
+				verified &&
+				(this.sessionUser(verified.sessionHash)?.id !== id ||
+					this.passwordHashOf(id) !== verified.passwordHash)
+			)
+				return false;
+			const { rowsWritten } = this.sql.exec(
+				`UPDATE users SET password_hash = ?, must_change_password = ?
+				WHERE id = ? AND username IS NOT NULL AND deleting = 0`,
+				passwordHash,
+				Number(mustChange),
+				id,
+			);
+			if (!rowsWritten) return false;
+			this.sql.exec(
+				"DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+				id,
+				verified?.sessionHash ?? "",
+			);
+			this.emailChallenges.clearSensitiveFlows(id);
+			this.sql.exec("DELETE FROM login_attempts WHERE key = ?", `user:${id}`);
+			return true;
+		});
 	}
 
 	/** 禁用后该用户的设备立即断开，登录状态全部注销。 */
 	async setDisabled(id: string, disabled: boolean): Promise<boolean> {
 		const { rowsWritten } = this.sql.exec(
-			"UPDATE users SET disabled = ? WHERE id = ?",
+			"UPDATE users SET disabled = ? WHERE id = ? AND deleting = 0",
 			disabled ? 1 : 0,
 			id,
 		);
@@ -347,44 +452,48 @@ export class Registry extends DurableObject<Env> {
 
 	// 登录
 
-	/**
-	 * 登录的第一步：检查是否尝试太多次，返回用户名对应的密码哈希。
-	 * 密码由 Worker 校验，再调用 recordLoginFailure 或 createSession。
-	 */
+	/** 用户名和邮箱解析到同一个账号后，共用登录失败次数。 */
 	beginLogin(
-		username: string,
+		identifier: string,
 		ip: string,
 	):
-		| { limited: true }
+		| { limited: "ip" }
+		| { limited: "account"; attemptKey: string }
 		| {
 				limited: false;
+				attemptKey: string;
 				user: { id: string; passwordHash: string } | null;
 		  } {
-		if (
-			this.failuresOf(`user:${username}`) >= MAX_FAILURES_PER_USERNAME ||
-			this.failuresOf(`ip:${ip}`) >= MAX_FAILURES_PER_IP
-		) {
-			return { limited: true };
-		}
+		const column = identifier.includes("@") ? "email" : "username";
 		const row = this.sql
-			.exec<{ id: string; password_hash: string }>(
-				"SELECT id, password_hash FROM users WHERE username = ? AND disabled = 0 AND password_hash IS NOT NULL",
-				username,
+			.exec<{ id: string; password_hash: string; disabled: number }>(
+				`SELECT id, password_hash, disabled FROM users WHERE ${column} = ?`,
+				identifier,
 			)
 			.toArray()[0];
+		const attemptKey = row ? `user:${row.id}` : `identifier:${identifier}`;
+		if (this.failuresOf(`ip:${ip}`) >= MAX_FAILURES_PER_IP)
+			return { limited: "ip" };
+		if (this.failuresOf(attemptKey) >= MAX_FAILURES_PER_ACCOUNT) {
+			return { limited: "account", attemptKey };
+		}
 		return {
 			limited: false,
-			user: row ? { id: row.id, passwordHash: row.password_hash } : null,
+			attemptKey,
+			user:
+				row && !row.disabled
+					? { id: row.id, passwordHash: row.password_hash }
+					: null,
 		};
 	}
 
-	recordLoginFailure(username: string, ip: string): void {
+	recordLoginFailure(attemptKey: string, ip: string): void {
 		const now = Date.now();
 		this.sql.exec(
-			"DELETE FROM login_attempts WHERE window_start < ?",
+			"DELETE FROM login_attempts WHERE window_start <= ?",
 			now - LOGIN_WINDOW_MS,
 		);
-		for (const key of [`user:${username}`, `ip:${ip}`]) {
+		for (const key of [attemptKey, `ip:${ip}`]) {
 			this.sql.exec(
 				`INSERT INTO login_attempts (key, failures, window_start) VALUES (?, 1, ?)
 				ON CONFLICT (key) DO UPDATE SET failures = failures + 1`,
@@ -394,22 +503,30 @@ export class Registry extends DurableObject<Env> {
 		}
 	}
 
-	/** 登录成功：清除该用户名的失败记录，返回新的登录状态令牌。 */
-	async createSession(userId: string, username: string): Promise<string> {
-		const now = Date.now();
+	/** 在验证密码后重新检查登录标识和账号是否仍有效。 */
+	async createSession(
+		userId: string,
+		identifier: string,
+		verifiedHash: string,
+	): Promise<string | null> {
 		const token = newToken();
-		this.sql.exec("DELETE FROM sessions WHERE expires_at < ?", now);
-		this.sql.exec(
-			"DELETE FROM login_attempts WHERE key = ?",
-			`user:${username}`,
-		);
-		this.sql.exec(
-			"INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-			await hashToken(token),
-			userId,
+		const tokenHash = await hashToken(token);
+		const now = Date.now();
+		const { rowsWritten } = this.sql.exec(
+			`INSERT INTO sessions (token_hash, user_id, created_at, expires_at)
+			SELECT ?, id, ?, ? FROM users
+			WHERE id = ? AND password_hash = ? AND disabled = 0 AND (username = ? OR email = ?)`,
+			tokenHash,
 			now,
 			now + SESSION_TTL_MS,
+			userId,
+			verifiedHash,
+			identifier,
+			identifier,
 		);
+		if (!rowsWritten) return null;
+		this.sql.exec("DELETE FROM sessions WHERE expires_at < ?", now);
+		this.sql.exec("DELETE FROM login_attempts WHERE key = ?", `user:${userId}`);
 		return token;
 	}
 
@@ -429,6 +546,155 @@ export class Registry extends DurableObject<Env> {
 
 	deleteSession(sessionHash: string): void {
 		this.sql.exec("DELETE FROM sessions WHERE token_hash = ?", sessionHash);
+	}
+
+	// 邮箱验证
+
+	startEmailFlow(
+		purpose: EmailPurpose,
+		email: string,
+		challenge: EmailFlow,
+		ip: string,
+		registration: { username: string; passwordHash: string } | null,
+		binding: { sessionHash: string; passwordHash: string } | null,
+	): EmailResult<{ send: boolean }> {
+		return this.ctx.storage.transactionSync(() => {
+			const existing = this.userByEmail(email);
+			const bindingUser = binding
+				? this.sessionUser(binding.sessionHash)
+				: null;
+			if (purpose === "bind") {
+				if (
+					!binding ||
+					!bindingUser ||
+					bindingUser.email ||
+					bindingUser.mustChangePassword ||
+					this.passwordHashOf(bindingUser.id) !== binding.passwordHash
+				) {
+					return {
+						ok: false,
+						error: "无法绑定邮箱，请重新登录后重试",
+						status: 403,
+					};
+				}
+				if (existing) {
+					return {
+						ok: false,
+						error: EMAIL_IN_USE,
+						status: 409,
+					};
+				}
+			}
+			const userId =
+				bindingUser?.id ??
+				(purpose === "reset" && existing && !existing.disabled
+					? existing.id
+					: null);
+			const pending = {
+				purpose,
+				email,
+				userId,
+				sessionHash: binding?.sessionHash ?? null,
+				username: registration?.username ?? null,
+				passwordHash: registration?.passwordHash ?? null,
+			};
+			if (!this.emailChallenges.start(pending, challenge, ip))
+				return emailRateLimited();
+			return {
+				ok: true,
+				send: purpose === "reset" ? userId !== null : !existing,
+			};
+		});
+	}
+
+	resendEmailFlow(
+		purpose: EmailPurpose,
+		challenge: EmailFlow,
+		ip: string,
+		sessionHash: string | null,
+	): EmailResult<{ email: string; send: boolean }> {
+		return this.ctx.storage.transactionSync(() => {
+			const pending = this.emailChallenges.find(
+				challenge.id,
+				purpose,
+				sessionHash,
+			);
+			if (!pending)
+				return {
+					ok: false,
+					error: "验证码已失效，请返回上一步重新获取",
+					status: 400,
+				};
+			const existing = this.userByEmail(pending.email);
+			if (purpose === "bind" && existing) {
+				return {
+					ok: false,
+					error: EMAIL_IN_USE,
+					status: 409,
+				};
+			}
+			if (!this.emailChallenges.resend(pending, challenge, ip))
+				return emailRateLimited();
+			return {
+				ok: true,
+				email: pending.email,
+				send:
+					purpose === "reset"
+						? !!existing && !existing.disabled && existing.id === pending.userId
+						: !existing,
+			};
+		});
+	}
+
+	verifyResetCode(challenge: EmailFlow): boolean {
+		return this.ctx.storage.transactionSync(() => {
+			return !!this.emailChallenges.verify(challenge, "reset", null)?.userId;
+		});
+	}
+
+	finishEmailFlow(
+		purpose: EmailPurpose,
+		challenge: EmailFlow,
+		sessionHash: string | null,
+		resetPasswordHash: string | null = null,
+	): Outcome<object> {
+		return this.ctx.storage.transactionSync(() => {
+			const pending = this.emailChallenges.verify(
+				challenge,
+				purpose,
+				sessionHash,
+			);
+			if (!pending) return invalidCode();
+			if (purpose === "register" && pending.username && pending.passwordHash) {
+				this.emailChallenges.remove(challenge.id);
+				return this.createUser({
+					username: pending.username,
+					email: pending.email,
+					passwordHash: pending.passwordHash,
+					mustChangePassword: false,
+				});
+			}
+			if (purpose === "bind" && sessionHash && pending.userId) {
+				const user = this.sessionUser(sessionHash);
+				if (
+					user?.id !== pending.userId ||
+					user.mustChangePassword ||
+					user.email
+				)
+					return invalidCode();
+				this.emailChallenges.remove(challenge.id);
+				return this.updateBoundEmail(user.id, pending.email);
+			}
+			if (purpose === "reset" && pending.userId && resetPasswordHash) {
+				const user = this.userByEmail(pending.email);
+				if (!user || user.disabled || user.id !== pending.userId)
+					return invalidCode();
+				return this.setPassword(user.id, resetPasswordHash, false)
+					? { ok: true }
+					: invalidCode();
+			}
+			return invalidCode();
+		});
 	}
 
 	// OAuth 应用
@@ -504,82 +770,97 @@ export class Registry extends DurableObject<Env> {
 			return;
 		}
 		this.ctx.storage.transactionSync(() => {
-			// 第 1 版：每个用户只有一个密钥，哈希存在 users.token_hash。新部署也从这里开始升级。
-			this.sql.exec(`CREATE TABLE IF NOT EXISTS users (
-				id TEXT PRIMARY KEY,
-				name TEXT NOT NULL,
-				token_hash TEXT NOT NULL UNIQUE,
-				disabled INTEGER NOT NULL DEFAULT 0,
-				created_at INTEGER NOT NULL
-			)`);
-
-			// 第 2 版：登录账号和多个密钥。原来的密钥变成一条同时具有两种权限的密钥，
-			// 已登录的 CLI 和已配置的连接器继续可用。token_hash 带有 UNIQUE 约束，
-			// SQLite 不能直接删除这一列，所以重建 users 表。
-			this.sql.exec(`CREATE TABLE keys (
-				id TEXT PRIMARY KEY,
-				user_id TEXT NOT NULL,
-				name TEXT NOT NULL,
-				token_hash TEXT NOT NULL UNIQUE,
-				scopes TEXT NOT NULL,
-				hint TEXT,
-				created_at INTEGER NOT NULL,
-				last_used_at INTEGER
-			)`);
-			this.sql.exec("CREATE INDEX keys_user_id ON keys (user_id)");
-			const legacy = this.sql
-				.exec<{ id: string; token_hash: string; created_at: number }>(
-					"SELECT id, token_hash, created_at FROM users",
-				)
-				.toArray();
-			for (const row of legacy) {
+			if (version < 2) this.migrateAccounts();
+			if (version < 3) {
+				this.sql.exec("ALTER TABLE users ADD COLUMN email TEXT");
+				this.sql.exec("CREATE UNIQUE INDEX users_email ON users (email)");
 				this.sql.exec(
-					"INSERT INTO keys (id, user_id, name, token_hash, scopes, created_at) VALUES (?, ?, ?, ?, 'device connector', ?)",
-					randomId(8),
-					row.id,
-					LEGACY_KEY_NAME,
-					row.token_hash,
-					row.created_at,
+					"ALTER TABLE users ADD COLUMN deleting INTEGER NOT NULL DEFAULT 0",
 				);
+				this.emailChallenges.migrate();
+				this.sql.exec("DELETE FROM login_attempts WHERE key LIKE 'user:%'");
 			}
-			this.sql.exec(`CREATE TABLE users_v2 (
-				id TEXT PRIMARY KEY,
-				username TEXT UNIQUE,
-				name TEXT NOT NULL,
-				password_hash TEXT,
-				must_change_password INTEGER NOT NULL DEFAULT 0,
-				disabled INTEGER NOT NULL DEFAULT 0,
-				created_at INTEGER NOT NULL
-			)`);
-			this.sql.exec(
-				"INSERT INTO users_v2 (id, name, disabled, created_at) SELECT id, name, disabled, created_at FROM users",
-			);
-			this.sql.exec("DROP TABLE users");
-			this.sql.exec("ALTER TABLE users_v2 RENAME TO users");
-			this.sql.exec(`CREATE TABLE sessions (
-				token_hash TEXT PRIMARY KEY,
-				user_id TEXT NOT NULL,
-				created_at INTEGER NOT NULL,
-				expires_at INTEGER NOT NULL
-			)`);
-			this.sql.exec("CREATE INDEX sessions_user_id ON sessions (user_id)");
-			this.sql.exec(`CREATE TABLE login_attempts (
-				key TEXT PRIMARY KEY,
-				failures INTEGER NOT NULL,
-				window_start INTEGER NOT NULL
-			)`);
-			// OAuth 授权保存在 OAUTH_KV，这里只记每个应用最后一次调用的时间
-			this.sql.exec(`CREATE TABLE app_usage (
-				user_id TEXT NOT NULL,
-				client_id TEXT NOT NULL,
-				last_used_at INTEGER NOT NULL,
-				PRIMARY KEY (user_id, client_id)
-			)`);
+			this.sql.exec("ALTER TABLE users DROP COLUMN name");
+
 			this.sql.exec(
 				"INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
 				String(SCHEMA_VERSION),
 			);
 		});
+	}
+
+	private migrateAccounts(): void {
+		// 第 1 版：每个用户只有一个密钥，哈希存在 users.token_hash。新部署也从这里开始升级。
+		this.sql.exec(`CREATE TABLE IF NOT EXISTS users (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL
+		)`);
+
+		// 第 2 版：登录账号和多个密钥。原来的密钥变成一条同时具有两种权限的密钥，
+		// 已登录的 CLI 和已配置的连接器继续可用。token_hash 带有 UNIQUE 约束，
+		// SQLite 不能直接删除这一列，所以重建 users 表。
+		this.sql.exec(`CREATE TABLE keys (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			scopes TEXT NOT NULL,
+			hint TEXT,
+			created_at INTEGER NOT NULL,
+			last_used_at INTEGER
+		)`);
+		this.sql.exec("CREATE INDEX keys_user_id ON keys (user_id)");
+		const legacy = this.sql
+			.exec<{ id: string; token_hash: string; created_at: number }>(
+				"SELECT id, token_hash, created_at FROM users",
+			)
+			.toArray();
+		for (const row of legacy) {
+			this.sql.exec(
+				"INSERT INTO keys (id, user_id, name, token_hash, scopes, created_at) VALUES (?, ?, ?, ?, 'device connector', ?)",
+				randomId(8),
+				row.id,
+				LEGACY_KEY_NAME,
+				row.token_hash,
+				row.created_at,
+			);
+		}
+		this.sql.exec(`CREATE TABLE users_v2 (
+			id TEXT PRIMARY KEY,
+			username TEXT UNIQUE,
+			name TEXT NOT NULL,
+			password_hash TEXT,
+			must_change_password INTEGER NOT NULL DEFAULT 0,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL
+		)`);
+		this.sql.exec(
+			"INSERT INTO users_v2 (id, name, disabled, created_at) SELECT id, name, disabled, created_at FROM users",
+		);
+		this.sql.exec("DROP TABLE users");
+		this.sql.exec("ALTER TABLE users_v2 RENAME TO users");
+		this.sql.exec(`CREATE TABLE sessions (
+			token_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL
+		)`);
+		this.sql.exec("CREATE INDEX sessions_user_id ON sessions (user_id)");
+		this.sql.exec(`CREATE TABLE login_attempts (
+			key TEXT PRIMARY KEY,
+			failures INTEGER NOT NULL,
+			window_start INTEGER NOT NULL
+		)`);
+		// OAuth 授权保存在 OAUTH_KV，这里只记每个应用最后一次调用的时间
+		this.sql.exec(`CREATE TABLE app_usage (
+			user_id TEXT NOT NULL,
+			client_id TEXT NOT NULL,
+			last_used_at INTEGER NOT NULL,
+			PRIMARY KEY (user_id, client_id)
+		)`);
 	}
 }
 
@@ -587,7 +868,8 @@ function toUser(row: UserRow): User {
 	return {
 		id: row.id,
 		username: row.username,
-		name: row.name,
+		email: row.email,
+		deleting: row.deleting === 1,
 		disabled: row.disabled === 1,
 		mustChangePassword: row.must_change_password === 1,
 		createdAt: row.created_at,
@@ -598,4 +880,20 @@ function parseScopes(text: string): Scope[] {
 	return text
 		.split(" ")
 		.filter((s): s is Scope => s === "device" || s === "connector");
+}
+
+type EmailResult<T> =
+	| ({ ok: true } & T)
+	| { ok: false; error: string; status: number };
+
+function invalidCode(): { ok: false; error: string; status: number } {
+	return {
+		ok: false,
+		error: "验证码无效，请检查验证码。已过期请返回上一步重新获取",
+		status: 400,
+	};
+}
+
+function emailRateLimited(): { ok: false; error: string; status: number } {
+	return { ok: false, error: "验证码请求过于频繁，请稍后重试", status: 429 };
 }

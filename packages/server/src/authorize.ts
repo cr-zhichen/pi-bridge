@@ -138,10 +138,7 @@ function consentPage(
 	devices: DeviceInfo[],
 ): string {
 	const name = escapeHtml(details.clientName);
-	const who =
-		user.name === user.username
-			? user.username
-			: `${user.name} · ${user.username}`;
+	const username = user.username ?? "";
 	return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -167,7 +164,7 @@ ${PAGE_HEAD}
 			: ""
 	}
 	<div class="who">
-		<span class="who-user"><span class="avatar">${escapeHtml(initial(user.name))}</span><span class="who-name">${escapeHtml(who)}</span></span>
+		<span class="who-user"><span class="avatar">${escapeHtml(initial(username))}</span><span class="who-name">${escapeHtml(username)}</span></span>
 		<form method="post" action="/logout?next=${encodeURIComponent(here)}"><button class="link">切换账号</button></form>
 	</div>
 	<span class="label">允许后，${name} 可以</span>

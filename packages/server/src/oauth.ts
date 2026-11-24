@@ -1,5 +1,6 @@
 import {
 	type GrantSummary,
+	OAuthError,
 	type OAuthHelpers,
 	OAuthProvider,
 	type OAuthResourceContext,
@@ -176,6 +177,11 @@ export function providerFor(
 			tokenEndpoint: "/oauth/token",
 			clientRegistrationEndpoint: "/oauth/register",
 			clientIdMetadataDocumentEnabled: true,
+			async tokenExchangeCallback({ env, userId }) {
+				if (!(await registryOf(env).isRetainedUser(userId))) {
+					throw new OAuthError("invalid_grant", { description: "账号已删除" });
+				}
+			},
 			resourceMetadata: {
 				resource: `${origin}/mcp`,
 				authorization_servers: [origin],

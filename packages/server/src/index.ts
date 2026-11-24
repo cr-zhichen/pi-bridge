@@ -30,7 +30,11 @@ const KEY_ACTIONS = new Map<string, Scope>([
  * - /<密钥>/devices      该用户的设备列表，CLI 的 login 和 status 使用，需要设备密钥
  */
 const routes = {
-	async fetch(request: Request, env: Env): Promise<Response> {
+	async fetch(
+		request: Request,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<Response> {
 		const url = new URL(request.url);
 		const parts = url.pathname.split("/").filter(Boolean);
 
@@ -41,12 +45,12 @@ const routes = {
 			return handleAdmin(request, env, parts.slice(1));
 		}
 		if (ACCOUNT_ROUTES.has(parts[0] ?? "")) {
-			return handleAccount(request, env, parts);
+			return handleAccount(request, env, parts, ctx);
 		}
 		if (parts[0] === "transfers") {
 			const [, fileId] = parts;
 			return parts.length === 2 && fileId && TRANSFER_ID_PATTERN.test(fileId)
-				? handleTransfer(request, env.TRANSFER_FILES, url, fileId)
+				? handleTransfer(request, env, url, fileId)
 				: notFound();
 		}
 
