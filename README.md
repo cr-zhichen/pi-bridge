@@ -38,8 +38,7 @@ pi-bridge 支持在对话中把本机文件上传为临时下载链接（最大 
 向任意收件人发信需要 Workers Paid。
 
 1. 在 Cloudflare 启用 [Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/) 并验证发信域名。
-2. 取消 `packages/server/wrangler.jsonc` 中 `send_email` 的注释并重新部署。
-3. 在 Worker 的 **Settings → Variables and Secrets** 中设置 `EMAIL_FROM`。
+2. 在 Worker 的 **Settings → Variables and Secrets** 中设置 `EMAIL_FROM`。
 
 设为 `ALLOW_REGISTRATION=true` 后，使用者可在登录页点击「注册账号」，验证邮箱后登录。已有账号的用户可在账号页绑定邮箱。绑定后可用邮箱登录，也可从登录页找回密码。
 

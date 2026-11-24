@@ -29,4 +29,14 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm run deploy
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          ALLOW_REGISTRATION: ${{ vars.ALLOW_REGISTRATION }}
+        run: |
+          args=()
+          if [[ -n "$EMAIL_FROM" ]]; then
+            args+=(--var "EMAIL_FROM:$EMAIL_FROM")
+          fi
+          if [[ -n "$ALLOW_REGISTRATION" ]]; then
+            args+=(--var "ALLOW_REGISTRATION:$ALLOW_REGISTRATION")
+          fi
+          pnpm run deploy "${args[@]}"
